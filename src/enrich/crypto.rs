@@ -1,0 +1,233 @@
+//! Enricher crypto (BTC/ETH) : sanctions OFAC (dataset offline) + (ETH) solde et
+//! nombre de transactions via Etherscan V2 (`api.etherscan.io/v2/api`, chainid=1).
+
+use anyhow::Result;
+use serde_json::Value;
+
+use crate::enrich::{Ctx, Enrichment, Fact, Pivot};
+use crate::model::Signal;
+
+/// Chaîne dérivée de l'adresse (`eth` si `0x…`, sinon `btc`).
+pub fn chain(addr: &str) -> &'static str {
+    if addr.starts_with("0x") { "eth" } else { "btc" }
+}
+
+/// Vrai si `addr` est un **hash de transaction** ETH (`0x` + 64 hex) plutôt
+/// qu'une adresse (`0x` + 40 hex).
+fn is_eth_tx(addr: &str) -> bool {
+    addr.strip_prefix("0x")
+        .or_else(|| addr.strip_prefix("0X"))
+        .is_some_and(|h| h.len() == 64)
+}
+
+/// Sanctions OFAC + type de chaîne (offline, pas de réseau).
+pub async fn ofac(addr: &str, ctx: &Ctx) -> Enrichment {
+    // Un txid n'est pas une adresse → pas de check sanctions, juste le contexte.
+    if is_eth_tx(addr) {
+        return Enrichment {
+            source: "ofac".into(),
+            facts: vec![
+                Fact::new("chain", "Ethereum"),
+                Fact::new("type", "hash de transaction"),
+            ],
+            signals: vec![],
+            pivots: vec![],
+            error: None,
+        };
+    }
+    let ch = chain(addr);
+    let mut facts = vec![Fact::new(
+        "chain",
+        if ch == "eth" { "Ethereum" } else { "Bitcoin" },
+    )];
+    let mut signals = Vec::new();
+    if ctx.store.load().is_sanctioned_crypto(addr) {
+        facts.push(Fact::new("ofac", "OUI — adresse sanctionnée"));
+        signals.push(Signal::with_detail(
+            "ofac_sdn",
+            "malicious",
+            "adresse crypto sanctionnée (OFAC SDN)",
+        ));
+    } else {
+        facts.push(Fact::new("ofac", "non listée"));
+    }
+    Enrichment {
+        source: "ofac".into(),
+        facts,
+        signals,
+        pivots: vec![],
+        error: None,
+    }
+}
+
+/// Etherscan V2 (ETH uniquement) : solde + nombre de tx envoyées (nonce). Gated.
+pub async fn etherscan(addr: &str, ctx: &Ctx) -> Enrichment {
+    let Some(key) = ctx.key("ETHERSCAN_API_KEY") else {
+        return Enrichment::failed("etherscan", "clé absente".into());
+    };
+    // Hash de transaction → détails de la tx ; sinon adresse → solde + nonce.
+    if is_eth_tx(addr) {
+        return match fetch_tx(&ctx.http, addr, key).await {
+            Ok(e) => e,
+            Err(e) => Enrichment::failed("etherscan", super::scrub(format!("{e:#}"), key)),
+        };
+    }
+    match fetch(&ctx.http, addr, key).await {
+        Ok((wei, nonce)) => build(wei, nonce),
+        Err(e) => Enrichment::failed("etherscan", super::scrub(format!("{e:#}"), key)),
+    }
+}
+
+/// Détails d'une transaction ETH via `eth_getTransactionByHash` (from/to/valeur/
+/// bloc) + pivots vers les adresses impliquées (elles-mêmes ré-analysables).
+async fn fetch_tx(http: &reqwest::Client, txid: &str, key: &str) -> Result<Enrichment> {
+    const BASE: &str = "https://api.etherscan.io/v2/api";
+    let v: Value = http
+        .get(BASE)
+        .query(&[
+            ("chainid", "1"),
+            ("module", "proxy"),
+            ("action", "eth_getTransactionByHash"),
+            ("txhash", txid),
+            ("apikey", key),
+        ])
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let Some(r) = v.get("result").filter(|x| !x.is_null()) else {
+        return Ok(Enrichment::ok(
+            "etherscan",
+            vec![Fact::new("etherscan", "transaction introuvable")],
+        ));
+    };
+    let hexnum = |k: &str| {
+        r.get(k)
+            .and_then(Value::as_str)
+            .and_then(|s| u128::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+    };
+    let from = r.get("from").and_then(Value::as_str).unwrap_or("?");
+    let to = r.get("to").and_then(Value::as_str).unwrap_or("?");
+    let eth = hexnum("value").unwrap_or(0) as f64 / 1e18;
+
+    let mut facts = vec![
+        Fact::new("from", from),
+        Fact::new("to", to),
+        Fact::new("valeur", format!("{eth:.6} ETH")),
+    ];
+    if let Some(b) = hexnum("blockNumber") {
+        facts.push(Fact::new("bloc", b.to_string()));
+    }
+    let mut pivots = Vec::new();
+    for (rel, a) in [("from", from), ("to", to)] {
+        if a.len() == 42 && a.starts_with("0x") {
+            pivots.push(Pivot {
+                relation: rel.into(),
+                kind: "crypto".into(),
+                value: a.to_string(),
+            });
+        }
+    }
+    Ok(Enrichment {
+        source: "etherscan".into(),
+        facts,
+        signals: vec![],
+        pivots,
+        error: None,
+    })
+}
+
+async fn fetch(http: &reqwest::Client, addr: &str, key: &str) -> Result<(u128, u64)> {
+    const BASE: &str = "https://api.etherscan.io/v2/api";
+    // Solde (wei, décimal string) — u128 suffit (offre totale ETH ≪ u128::MAX).
+    let b: Value = http
+        .get(BASE)
+        .query(&[
+            ("chainid", "1"),
+            ("module", "account"),
+            ("action", "balance"),
+            ("address", addr),
+            ("tag", "latest"),
+            ("apikey", key),
+        ])
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let wei: u128 = b
+        .get("result")
+        .and_then(|x| x.as_str())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    // Nombre de tx envoyées (nonce, hex) via le proxy JSON-RPC.
+    let n: Value = http
+        .get(BASE)
+        .query(&[
+            ("chainid", "1"),
+            ("module", "proxy"),
+            ("action", "eth_getTransactionCount"),
+            ("address", addr),
+            ("tag", "latest"),
+            ("apikey", key),
+        ])
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    let nonce = n
+        .get("result")
+        .and_then(|x| x.as_str())
+        .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
+        .unwrap_or(0);
+    Ok((wei, nonce))
+}
+
+fn build(wei: u128, nonce: u64) -> Enrichment {
+    let eth = wei as f64 / 1e18;
+    Enrichment {
+        source: "etherscan".into(),
+        facts: vec![
+            Fact::new("balance", format!("{eth:.4} ETH")),
+            Fact::new("tx_envoyées", nonce.to_string()),
+        ],
+        signals: vec![],
+        pivots: vec![],
+        error: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chain_detection() {
+        assert_eq!(chain("0xabc"), "eth");
+        assert_eq!(chain("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), "btc");
+    }
+
+    #[test]
+    fn etherscan_build() {
+        let e = build(1_500_000_000_000_000_000, 42);
+        assert!(
+            e.facts
+                .iter()
+                .any(|f| f.key == "balance" && f.value.contains("1.5"))
+        );
+        assert!(
+            e.facts
+                .iter()
+                .any(|f| f.key == "tx_envoyées" && f.value == "42")
+        );
+    }
+
+    #[test]
+    fn eth_tx_vs_address() {
+        assert!(is_eth_tx(&format!("0x{}", "a".repeat(64))));
+        assert!(!is_eth_tx(&format!("0x{}", "a".repeat(40))));
+        assert!(!is_eth_tx("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"));
+    }
+}

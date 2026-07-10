@@ -1,0 +1,46 @@
+# indic — déploiement derrière un reverse-proxy / tunnel (Cloudflare, Caddy, …).
+#
+# Le service écoute sur 127.0.0.1:8080 côté hôte ; ton proxy/tunnel route
+# ton domaine -> http://localhost:8080. Aucun port entrant ouvert sur l'hôte.
+
+services:
+  indic:
+    build: .
+    image: indic:latest
+    restart: unless-stopped
+    # Bind sur loopback uniquement : seul le tunnel CF y accède.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - indic-data:/data
+    # Toutes les clés (~/indic/.env) sont injectées ici. Fichier jamais commité.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      INDIC_BIND: "0.0.0.0:8080"
+      INDIC_REFRESH_HOURS: "12"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/indic", "lookup", "1.1.1.1"]
+      interval: 1h
+      timeout: 20s
+      retries: 2
+    # Réseaux ci-dessous = pour pousser les IOC (POST /push) vers MISP/OpenCTI
+    # colocalisés via le DNS docker interne. Si tu ne fais pas tourner MISP/OpenCTI
+    # sur le même hôte : supprime `misp`/`xtm` ici ET la section `networks:` en bas,
+    # et vise des MISP_URL/OPENCTI_URL joignables.
+    networks:
+      - default
+      - misp
+      - xtm
+
+volumes:
+  indic-data:
+
+networks:
+  misp:
+    external: true
+    name: misp_default
+  xtm:
+    external: true
+    name: xtm_default

@@ -1,11 +1,27 @@
 # indic
 
+[![CI](https://github.com/Wes974/indic/actions/workflows/ci.yml/badge.svg)](https://github.com/Wes974/indic/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-2024-orange.svg?logo=rust)](https://www.rust-lang.org)
+
 **A single-binary CTI / OSINT enrichment platform in Rust.** Paste (almost)
 any observable and get aggregated threat-intel from ~60 free and keyed sources,
 a calibrated verdict, a recursive pivot graph, and proactive monitoring.
 
 > Personal project, built for **defensive** and **authorized** security research
 > (blue-team, CTI, OSINT). No offensive tooling. See the disclaimer below.
+
+## Screenshots
+
+The landing page — 13 observable types, each with clickable examples:
+
+![indic landing page](assets/01-landing.png)
+
+A domain report with the **calibrated verdict** — `github.com` reads **clean**
+despite hosted-malware signals, thanks to the corroboration + popularity model
+(the signals point to *hosted* content, not the domain itself):
+
+![indic report for github.com](assets/02-report.png)
 
 ---
 

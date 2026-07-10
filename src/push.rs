@@ -235,14 +235,19 @@ pub async fn push_report(report: &Report, ctx: &Ctx) -> PushOutcome {
         );
     }
 
-    // Client tolérant au cert self-signed de MISP sur le réseau docker interne.
-    let insecure = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
+    // Vérification TLS **active par défaut**. `INDIC_PUSH_INSECURE_TLS=1`
+    // l'assouplit pour accepter un cert self-signed/invalide (ex. MISP joint
+    // via le réseau docker interne `misp-core:443`). À n'activer que pour une
+    // cible interne de confiance — jamais pour un MISP_URL public.
+    let insecure_tls =
+        std::env::var("INDIC_PUSH_INSECURE_TLS").is_ok_and(|v| v == "1" || v == "true");
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(insecure_tls)
         .timeout(Duration::from_secs(20))
         .build()
         .ok();
 
-    let misp = match (misp_url, misp_key, insecure.as_ref()) {
+    let misp = match (misp_url, misp_key, client.as_ref()) {
         (Some(url), Some(key), Some(client)) => Some(push_misp(report, url, key, client).await),
         (Some(_), Some(_), None) => Some(TargetResult::err("client HTTP indisponible")),
         _ => None,

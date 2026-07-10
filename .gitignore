@@ -1,0 +1,18 @@
+# Rust
+/target
+
+# Datasets téléchargés (rafraîchis par `indic update`)
+/data
+
+# Secrets / config locale
+.env
+
+# Bases optionnelles
+*.mmdb
+
+# Notes internes / spécifiques à mon infra — hors dépôt public
+JOURNAL.md
+ROADMAP.md
+VEILLE.md
+HONEYPOT.md
+/deploy/

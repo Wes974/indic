@@ -1,0 +1,44 @@
+# Honeypot dédié — Cowrie (SSH/Telnet) + OpenCanary (tripwire multi-services)
+# + collecteur d'IOC vers indic.
+#
+# ⚠️ À DÉPLOYER SUR UN HÔTE DÉDIÉ SÉPARÉ (jamais sur le même hôte qu'indic / ta prod).
+# ⚠️ Mets ton SSH admin sur un port NON standard (ex. 62222) AVANT de lancer :
+#    Cowrie occupe le port 22 (c'est l'appât). Voir README.md + harden.sh.
+#
+# Requiert un fichier .env à côté avec au moins : INDIC_TOKEN=... (le token indic).
+
+services:
+  # Cowrie : SSH/Telnet moyenne interaction, sessions rejouables, log JSON.
+  cowrie:
+    image: cowrie/cowrie:latest
+    restart: unless-stopped
+    ports:
+      - "22:2222"   # SSH appât  (Cowrie écoute 2222 en interne)
+      - "23:2223"   # Telnet appât
+    volumes:
+      - ./data/cowrie:/cowrie/var/log/cowrie
+
+  # OpenCanary : tripwire faible interaction sur d'autres ports (FTP/HTTP/MySQL).
+  opencanary:
+    image: thinkst/opencanary:latest
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./opencanary.conf:/root/.opencanary.conf:ro
+      - ./data/opencanary:/var/tmp
+
+  # Collecteur : tail des logs → POST /push d'indic (→ MISP + OpenCTI).
+  collector:
+    image: python:3.12-alpine
+    restart: unless-stopped
+    depends_on: [cowrie, opencanary]
+    environment:
+      INDIC_URL: ${INDIC_URL:-https://indic.example.com}
+      INDIC_TOKEN: ${INDIC_TOKEN:?INDIC_TOKEN requis dans .env}
+      COLLECTOR_LOGS: /logs/cowrie/cowrie.json,/logs/opencanary/opencanary.log
+      COLLECTOR_DEDUP_TTL: "3600"
+    volumes:
+      - ./collector.py:/collector.py:ro
+      - ./data/cowrie:/logs/cowrie:ro
+      - ./data/opencanary:/logs/opencanary:ro
+    command: python /collector.py

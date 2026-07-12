@@ -12,7 +12,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::json;
 
-use crate::enrich::{self, Ctx};
+use crate::enrich::{self, Ctx, Report};
 use crate::observable::Observable;
 use crate::push;
 
@@ -28,37 +28,111 @@ pub fn router(ctx: SharedCtx) -> Router {
         .route("/metrics", get(metrics))
         .route("/settings", get(settings))
         .route("/lookup", get(lookup_q))
+        .route("/lookup/bulk", post(lookup_bulk))
+        .route("/lookup/export", get(lookup_export))
         .route("/push", post(push_obs))
+        .route("/sw.js", get(service_worker))
+        .route("/history", get(history_recent))
+        .route("/dashboard", get(dashboard))
+        .route("/extract", post(extract_iocs))
+        .route("/correlate", get(correlate_q))
         // Alias historiques (compat).
         .route("/v1/check", get(check_query))
         .route("/ip/{addr}", get(check_path))
         .with_state(ctx)
 }
 
-async fn index() -> Html<&'static str> {
-    Html(INDEX_HTML)
+async fn index() -> impl IntoResponse {
+    ([(axum::http::header::CACHE_CONTROL, "no-cache, no-store, must-revalidate")], Html(INDEX_HTML))
 }
 
 async fn healthz() -> &'static str {
     "ok"
 }
 
-/// `GET /metrics` — compteurs par source (ok/err/cache-hit/latence moyenne). Gated.
-async fn metrics(State(ctx): State<SharedCtx>, headers: HeaderMap) -> Response {
-    if !authorized(&ctx, &headers, None) {
+/// Service worker pour le support PWA hors-ligne (network-first, fallback cache).
+async fn service_worker() -> (
+    StatusCode,
+    [(axum::http::header::HeaderName, &'static str); 1],
+    &'static str,
+) {
+    let sw = "const CACHE='indic-v2';self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));e.waitUntil(self.clients.claim())});self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).then(r=>{const c=r.clone();caches.open(CACHE).then(ca=>ca.put(e.request,c));return r}).catch(()=>caches.match(e.request)))});";
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/javascript")],
+        sw,
+    )
+}
+
+/// `GET /metrics` — compteurs par source. Format par défaut JSON, `?format=prometheus`
+/// pour exposition Prometheus (scrapable). Gated.
+async fn metrics(
+    State(ctx): State<SharedCtx>,
+    headers: HeaderMap,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let token = params.get("token").map(|s| s.as_str());
+    if !authorized(&ctx, &headers, token) {
         return (
             StatusCode::FORBIDDEN,
-            Json(json!({ "error": "non autorisé" })),
+            Json(json!({ "error": "non autorisé — utiliser ?token= ou le header x-indic-token" })),
         )
             .into_response();
     }
-    Json(ctx.cache.metrics()).into_response()
+    let fmt = params.get("format").map(|s| s.as_str()).unwrap_or("json");
+    if fmt == "prometheus" {
+        prometheus_metrics(&ctx).into_response()
+    } else {
+        Json(ctx.cache.metrics()).into_response()
+    }
+}
+
+/// Génère les métriques au format exposition Prometheus.
+fn prometheus_metrics(ctx: &Ctx) -> String {
+    let mut out = String::new();
+    let metrics = ctx.cache.metrics();
+    for m in &metrics {
+        out.push_str(&format!(
+            "indic_source_ok{{source=\"{}\"}} {}\n",
+            m.source, m.ok
+        ));
+        out.push_str(&format!(
+            "indic_source_err{{source=\"{}\"}} {}\n",
+            m.source, m.err
+        ));
+        out.push_str(&format!(
+            "indic_source_cache_hit{{source=\"{}\"}} {}\n",
+            m.source, m.cache_hit
+        ));
+        out.push_str(&format!(
+            "indic_source_neg_hit{{source=\"{}\"}} {}\n",
+            m.source, m.neg_hit
+        ));
+        out.push_str(&format!(
+            "indic_source_calls{{source=\"{}\"}} {}\n",
+            m.source, m.calls
+        ));
+        out.push_str(&format!(
+            "indic_source_avg_latency_ms{{source=\"{}\"}} {}\n",
+            m.source, m.avg_latency_ms
+        ));
+    }
+    out.push_str(&format!("indic_cache_size {}\n", metrics.len()));
+    out
 }
 
 #[derive(Deserialize)]
 struct LookupQ {
     q: Option<String>,
     ip: Option<String>,
+    token: Option<String>,
+    /// Format d'export : `stix` ou `csv` (uniquement sur /lookup/export).
+    format: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct BulkQ {
+    queries: Vec<String>,
     token: Option<String>,
 }
 
@@ -67,9 +141,21 @@ struct TokenQ {
     token: Option<String>,
 }
 
-/// `GET /settings` — statut de configuration pour la page réglages : présence
-/// **booléenne** de chaque clé connue (jamais la valeur), état du token, version
-/// des feeds. Gated (mêmes règles que /metrics) — ne révèle aucun secret.
+#[derive(Deserialize)]
+struct HistoryQ {
+    token: Option<String>,
+    limit: Option<u32>,
+    kind: Option<String>,
+    verdict: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CorrelateQ {
+    q: Option<String>,
+    token: Option<String>,
+}
+
+/// `GET /settings` — statut de config (présence booléenne de chaque clé). Gated.
 async fn settings(
     State(ctx): State<SharedCtx>,
     headers: HeaderMap,
@@ -97,18 +183,230 @@ async fn settings(
     .into_response()
 }
 
-/// `GET /lookup?q=…` — accepte n'importe quel observable ; sans `q`/`ip`,
-/// tente l'IP du client (header CF/proxy).
+/// `GET /lookup?q=…` — enrichit un observable (avec rate limiting).
 async fn lookup_q(
     State(ctx): State<SharedCtx>,
     headers: HeaderMap,
     Query(p): Query<LookupQ>,
 ) -> Response {
+    let ip = client_ip(&headers).unwrap_or_else(|| "unknown".into());
+    if !ctx.rate_limiter.allow(&ip) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({ "error": "trop de requêtes — réessaie dans une minute" })),
+        )
+            .into_response();
+    }
     let auth = authorized(&ctx, &headers, p.token.as_deref());
     match p.q.or(p.ip).or_else(|| client_ip(&headers)) {
-        Some(raw) => dispatch(&ctx, &raw, auth).await,
+        Some(raw) => dispatch_and_record(&ctx, &raw, auth).await,
         None => bad_request("paramètre `q` manquant et IP client indéterminée"),
     }
+}
+
+/// `GET /lookup/export?q=…&format=stix|csv` — enrichit + exporte au format demandé.
+async fn lookup_export(
+    State(ctx): State<SharedCtx>,
+    headers: HeaderMap,
+    Query(p): Query<LookupQ>,
+) -> Response {
+    let auth = authorized(&ctx, &headers, p.token.as_deref());
+    let Some(raw) = p.q.or(p.ip).or_else(|| client_ip(&headers)) else {
+        return bad_request("paramètre `q` manquant");
+    };
+    let Some(obs) = Observable::detect(&raw) else {
+        return bad_request(&format!("observable non reconnu : {raw}"));
+    };
+    let report = enrich::run(&raw, &obs, &ctx, auth).await;
+    record_lookup(&ctx, &report);
+
+    match p.format.as_deref() {
+        Some("stix") | Some("stix21") => {
+            let bundle = crate::stix::to_stix21(&report);
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/stix+json")],
+                Json(bundle),
+            )
+                .into_response()
+        }
+        Some("csv") => {
+            let csv = crate::stix::to_csv(&report);
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "text/csv")],
+                csv,
+            )
+                .into_response()
+        }
+        _ => bad_request("format inconnu — utiliser `stix` ou `csv`"),
+    }
+}
+
+/// `POST /lookup/bulk` — enrichit plusieurs observables en parallèle.
+/// Body JSON : `{"queries": ["1.1.1.1", "evil.com"], "token": "..."}`.
+async fn lookup_bulk(
+    State(ctx): State<SharedCtx>,
+    headers: HeaderMap,
+    Json(body): Json<BulkQ>,
+) -> Response {
+    let auth = authorized(&ctx, &headers, body.token.as_deref());
+    if body.queries.is_empty() {
+        return bad_request("liste `queries` vide");
+    }
+    if body.queries.len() > 20 {
+        return bad_request("maximum 20 observables par lot");
+    }
+    let futs: Vec<_> = body
+        .queries
+        .iter()
+        .map(|q| {
+            let obs = Observable::detect(q);
+            let raw = q.clone();
+            let ctx = ctx.clone();
+            async move {
+                match obs {
+                    Some(o) => {
+                        let r = enrich::run(&raw, &o, &ctx, auth).await;
+                        json!({ "query": raw, "kind": r.kind, "verdict": r.verdict, "ok": true })
+                    }
+                    None => json!({ "query": raw, "error": "observable non reconnu", "ok": false }),
+                }
+            }
+        })
+        .collect();
+    let results = futures::future::join_all(futs).await;
+    Json(json!({ "results": results })).into_response()
+}
+
+/// `GET /history?limit=50` — N derniers lookups (opt-in, gated).
+async fn history_recent(
+    State(ctx): State<SharedCtx>,
+    headers: HeaderMap,
+    Query(q): Query<HistoryQ>,
+) -> Response {
+    if !authorized(&ctx, &headers, q.token.as_deref()) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "non autorisé" })),
+        )
+            .into_response();
+    }
+    let Some(ref h) = ctx.history else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "historique non activé (INDIC_HISTORY=1)" })),
+        )
+            .into_response();
+    };
+    let limit = q.limit.unwrap_or(50).min(200);
+    let mut entries = h.recent(limit * 2); // overfetch for filtering
+    // Filtres optionnels
+    if let Some(ref k) = q.kind {
+        entries.retain(|e| e.kind == *k);
+    }
+    if let Some(ref v) = q.verdict {
+        entries.retain(|e| e.verdict_label.as_deref() == Some(v.as_str()));
+    }
+    entries.truncate(limit as usize);
+    Json(entries).into_response()
+}
+
+/// `GET /dashboard` — stats agrégées : public (anonymisé) ou gated (détaillé).
+async fn dashboard(
+    State(ctx): State<SharedCtx>,
+    headers: HeaderMap,
+    Query(q): Query<TokenQ>,
+) -> Response {
+    let Some(ref h) = ctx.history else {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "historique non activé (INDIC_HISTORY=1)" }))).into_response();
+    };
+    let gated = authorized(&ctx, &headers, q.token.as_deref());
+    // Stats publiques (anonymisées) : toujours dispo.
+    let recent = h.recent(100);
+    let total = recent.len() as u64;
+    let by_kind: std::collections::HashMap<String, u64> = recent.iter().fold(
+        std::collections::HashMap::new(),
+        |mut acc, e| { *acc.entry(e.kind.clone()).or_default() += 1; acc },
+    );
+    let malicious = recent.iter().filter(|e| e.verdict_label.as_deref() == Some("malicious")).count() as u64;
+    let suspect = recent.iter().filter(|e| e.verdict_label.as_deref() == Some("suspect")).count() as u64;
+    let clean = recent.iter().filter(|e| e.verdict_label.as_deref() == Some("clean")).count() as u64;
+    let mut base = json!({
+        "total_lookups": total,
+        "by_kind": by_kind,
+        "verdicts": { "malicious": malicious, "suspect": suspect, "clean": clean },
+    });
+    // Détails gated : derniers lookups avec query.
+    if gated
+        && let Some(obj) = base.as_object_mut()
+    {
+        obj.insert("recent".into(), json!(recent.iter().take(20).collect::<Vec<_>>()));
+    }
+    Json(base).into_response()
+}
+
+/// `POST /extract` — extrait les IOC d'un texte (IP, domaines, hashes, CVE, URLs, emails).
+#[derive(Deserialize)]
+struct ExtractQ { text: String }
+async fn extract_iocs(Json(body): Json<ExtractQ>) -> Response {
+    use crate::observable::Observable;
+    let mut iocs: Vec<serde_json::Value> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    // Découper le texte en tokens par whitespace/punctuation
+    for token in body.text.split(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_' && c != '@' && c != ':' && c != '/') {
+        let token = token.trim().trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-');
+        if token.is_empty() || token.len() > 300 { continue; }
+        // Exclure les numéros de version, dates, etc.
+        if token.chars().all(|c| c.is_ascii_digit() || c == '.') && token.matches('.').count() <= 1 { continue; }
+        if let Some(obs) = Observable::detect(token) {
+            let v = token.to_lowercase();
+            if seen.insert(v.clone()) {
+                match obs {
+                    Observable::Ip(_) => iocs.push(json!({"type": "ip", "value": v})),
+                    Observable::Cidr(_) => iocs.push(json!({"type": "ip", "value": v})),
+                    Observable::Domain(_) => iocs.push(json!({"type": "domain", "value": v})),
+                    Observable::Url(_) => iocs.push(json!({"type": "url", "value": token.to_string()})),
+                    Observable::Hash(_) => iocs.push(json!({"type": "hash", "value": v})),
+                    Observable::Cve(_) => iocs.push(json!({"type": "cve", "value": token.to_uppercase()})),
+                    Observable::Email(_) => iocs.push(json!({"type": "email", "value": v})),
+                    _ => {}
+                }
+            }
+        }
+    }
+    iocs.truncate(50);
+    Json(json!({"iocs": iocs, "count": iocs.len()})).into_response()
+}
+
+/// `GET /correlate?q=1.2.3.4` — cherche des corrélations dans l'historique.
+async fn correlate_q(
+    State(ctx): State<SharedCtx>,
+    headers: HeaderMap,
+    Query(q): Query<CorrelateQ>,
+) -> Response {
+    if !authorized(&ctx, &headers, q.token.as_deref()) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "non autorisé" })),
+        )
+            .into_response();
+    }
+    let Some(ref h) = ctx.history else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "historique non activé (INDIC_HISTORY=1)" })),
+        )
+            .into_response();
+    };
+    let Some(raw) = q.q else {
+        return bad_request("paramètre `q` manquant");
+    };
+    let Some(obs) = Observable::detect(&raw) else {
+        return bad_request(&format!("observable non reconnu : {raw}"));
+    };
+    let correlations = crate::correlate::correlate(&raw, obs.kind(), h);
+    Json(correlations).into_response()
 }
 
 #[derive(Deserialize)]
@@ -117,14 +415,23 @@ struct CheckQ {
     token: Option<String>,
 }
 
+// Rate-limited alias for backward compat
 async fn check_query(
     State(ctx): State<SharedCtx>,
     headers: HeaderMap,
     Query(q): Query<CheckQ>,
 ) -> Response {
+    let ip = client_ip(&headers).unwrap_or_else(|| "unknown".into());
+    if !ctx.rate_limiter.allow(&ip) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({ "error": "trop de requêtes — réessaie dans une minute" })),
+        )
+            .into_response();
+    }
     let auth = authorized(&ctx, &headers, q.token.as_deref());
     match q.ip.or_else(|| client_ip(&headers)) {
-        Some(ip) => dispatch(&ctx, &ip, auth).await,
+        Some(addr) => dispatch_and_record(&ctx, &addr, auth).await,
         None => bad_request("paramètre `ip` manquant et IP client indéterminée"),
     }
 }
@@ -134,19 +441,78 @@ async fn check_path(
     headers: HeaderMap,
     Path(addr): Path<String>,
 ) -> Response {
+    let ip = client_ip(&headers).unwrap_or_else(|| "unknown".into());
+    if !ctx.rate_limiter.allow(&ip) {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({ "error": "trop de requêtes — réessaie dans une minute" })),
+        )
+            .into_response();
+    }
     let auth = authorized(&ctx, &headers, None);
-    dispatch(&ctx, &addr, auth).await
+    dispatch_and_record(&ctx, &addr, auth).await
 }
 
-async fn dispatch(ctx: &Ctx, raw: &str, auth: bool) -> Response {
+async fn dispatch_and_record(ctx: &Ctx, raw: &str, auth: bool) -> Response {
     match Observable::detect(raw) {
-        Some(obs) => Json(enrich::run(raw, &obs, ctx, auth).await).into_response(),
+        Some(obs) => {
+            let report = enrich::run(raw, &obs, ctx, auth).await;
+            record_lookup(ctx, &report);
+            // Ajouter les corrélations si l'historique est activé
+            let mut resp = json!(report);
+            if let Some(ref h) = ctx.history {
+                let correlations = crate::correlate::correlate(raw, obs.kind(), h);
+                if !correlations.is_empty()
+                    && let Some(obj) = resp.as_object_mut() {
+                        obj.insert("correlations".into(), json!(correlations));
+                    }
+            }
+            // Ajouter le mapping ATT&CK pour les CVE
+            if let Observable::Cve(_) = obs {
+                // Récupérer les CWEs depuis l'enrichment cvedb
+                let cwes: Vec<String> = report
+                    .enrichments
+                    .iter()
+                    .filter(|e| e.source == "cvedb")
+                    .flat_map(|e| e.facts.iter())
+                    .filter(|f| f.key == "cwes")
+                    .flat_map(|f| f.value.split(", ").map(String::from))
+                    .collect();
+                if !cwes.is_empty() {
+                    let attack_signals = crate::attack::attack_signals(&cwes, &ctx.attack_map);
+                    if !attack_signals.is_empty()
+                        && let Some(obj) = resp.as_object_mut() {
+                            obj.insert("mitre_attack".into(), json!(attack_signals));
+                        }
+                }
+            }
+            Json(resp).into_response()
+        }
         None => bad_request(&format!("observable non reconnu : {raw}")),
     }
 }
 
-/// `POST /push?q=…` — enrichit l'observable puis pousse le résultat vers MISP /
-/// OpenCTI si un signal de menace est présent. Gated : écrit dans les plateformes.
+/// Enregistre un lookup dans l'historique SQLite si activé.
+fn record_lookup(ctx: &Ctx, report: &Report) {
+    if let Some(ref h) = ctx.history {
+        let source_count = report.enrichments.len() as u32;
+        let signal_count = report
+            .enrichments
+            .iter()
+            .map(|e| e.signals.len() as u32)
+            .sum();
+        h.record(
+            &report.query,
+            &report.kind,
+            report.verdict.as_ref().map(|v| v.label),
+            report.verdict.as_ref().map(|v| v.score),
+            source_count,
+            signal_count,
+        );
+    }
+}
+
+/// `POST /push?q=…` — enrichit puis pousse vers MISP/OpenCTI. Gated.
 async fn push_obs(
     State(ctx): State<SharedCtx>,
     headers: HeaderMap,
@@ -171,11 +537,9 @@ async fn push_obs(
     }
 }
 
-/// Autorise les enrichers payants. Aucun token configuré = ouvert (dev).
+/// Autorise les enrichers payants.
 fn authorized(ctx: &Ctx, headers: &HeaderMap, query_token: Option<&str>) -> bool {
     let Some(expected) = &ctx.token else {
-        // Aucun token configuré : fail-closed si des clés payantes existent
-        // (sinon un INDIC_TOKEN oublié exposerait tes quotas au public).
         return !ctx.has_paid_key();
     };
     let provided = query_token
@@ -184,7 +548,6 @@ fn authorized(ctx: &Ctx, headers: &HeaderMap, query_token: Option<&str>) -> bool
     provided == Some(expected.as_str())
 }
 
-/// Extrait la valeur d'un cookie par nom.
 fn cookie_value<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     let cookies = headers.get("cookie")?.to_str().ok()?;
     cookies
@@ -196,7 +559,6 @@ fn bad_request(msg: &str) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({ "error": msg }))).into_response()
 }
 
-/// IP réelle du client derrière le tunnel Cloudflare / un reverse-proxy.
 fn client_ip(headers: &HeaderMap) -> Option<String> {
     for h in ["cf-connecting-ip", "x-forwarded-for", "x-real-ip"] {
         if let Some(val) = headers.get(h).and_then(|v| v.to_str().ok()) {

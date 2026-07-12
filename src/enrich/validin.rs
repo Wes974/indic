@@ -8,7 +8,7 @@ use serde_json::Value;
 use crate::enrich::{Ctx, Enrichment, Fact, Pivot};
 
 pub async fn enrich_domain(domain: &str, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("VALIDIN_API_KEY") else {
+    let Some(ref key) = ctx.key("VALIDIN_API_KEY") else {
         return Enrichment::failed("validin", "clé absente".into());
     };
     match fetch(&ctx.http, domain, key).await {

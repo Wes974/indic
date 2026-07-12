@@ -248,12 +248,12 @@ pub async fn push_report(report: &Report, ctx: &Ctx) -> PushOutcome {
         .ok();
 
     let misp = match (misp_url, misp_key, client.as_ref()) {
-        (Some(url), Some(key), Some(client)) => Some(push_misp(report, url, key, client).await),
+        (Some(url), Some(key), Some(client)) => Some(push_misp(report, &url, &key, client).await),
         (Some(_), Some(_), None) => Some(TargetResult::err("client HTTP indisponible")),
         _ => None,
     };
     let opencti = match (octi_url, octi_token) {
-        (Some(url), Some(token)) => Some(push_opencti(report, url, token, ctx).await),
+        (Some(url), Some(token)) => Some(push_opencti(report, &url, &token, ctx).await),
         _ => None,
     };
 
@@ -413,6 +413,8 @@ mod tests {
             }],
             pivots: vec![],
             verdict: None,
+            threat_actors: vec![],
+            freshness: None,
         };
         // Source curée → un seul hit suffit.
         assert!(should_push(&report(vec![Signal::new("feodo", "c2")])));

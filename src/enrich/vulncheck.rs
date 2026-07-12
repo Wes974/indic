@@ -9,7 +9,7 @@ use crate::enrich::{Ctx, Enrichment, Fact};
 use crate::model::Signal;
 
 pub async fn enrich_cve(cve: &str, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("VULNCHECK_API_KEY") else {
+    let Some(ref key) = ctx.key("VULNCHECK_API_KEY") else {
         return Enrichment::failed("vulncheck", "clé absente".into());
     };
     match fetch(&ctx.http, cve, key).await {

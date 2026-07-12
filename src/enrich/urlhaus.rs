@@ -38,7 +38,7 @@ pub async fn enrich_hash(hash: &str, ctx: &Ctx) -> Enrichment {
 }
 
 async fn run(ctx: &Ctx, endpoint: &str, param: (&str, &str), parse: ParseFn) -> Enrichment {
-    let Some(key) = ctx.key("ABUSE_CH_API_KEY") else {
+    let Some(ref key) = ctx.key("ABUSE_CH_API_KEY") else {
         return Enrichment::failed("urlhaus", "clé absente".into());
     };
     match fetch(&ctx.http, endpoint, param, key)

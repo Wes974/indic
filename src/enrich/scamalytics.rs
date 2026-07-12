@@ -20,9 +20,9 @@ pub async fn enrich_ip(ip: IpAddr, ctx: &Ctx) -> Enrichment {
     ) else {
         return Enrichment::failed("scamalytics", "user/clé absent".into());
     };
-    match fetch(ctx, user, key, ip).await {
+    match fetch(ctx, &user, &key, ip).await {
         Ok(e) => e,
-        Err(e) => Enrichment::failed("scamalytics", super::scrub(format!("{e:#}"), key)),
+        Err(e) => Enrichment::failed("scamalytics", super::scrub(format!("{e:#}"), &key)),
     }
 }
 

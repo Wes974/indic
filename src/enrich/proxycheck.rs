@@ -11,7 +11,7 @@ use crate::enrich::{Ctx, Enrichment, Fact};
 use crate::model::Signal;
 
 pub async fn enrich_ip(ip: IpAddr, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("PROXYCHECK_API_KEY") else {
+    let Some(ref key) = ctx.key("PROXYCHECK_API_KEY") else {
         return Enrichment::failed("proxycheck", "clé absente".into());
     };
     match fetch(ctx, ip, key).await {

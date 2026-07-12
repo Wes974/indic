@@ -9,7 +9,7 @@ use crate::enrich::{Ctx, Enrichment, Fact};
 use crate::model::Signal;
 
 pub async fn enrich_email(email: &str, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("HUNTER_IO_API_KEY") else {
+    let Some(ref key) = ctx.key("HUNTER_IO_API_KEY") else {
         return Enrichment::failed("hunter", "clé absente".into());
     };
     match fetch(&ctx.http, email, key).await {

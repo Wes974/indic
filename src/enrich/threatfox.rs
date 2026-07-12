@@ -25,7 +25,7 @@ pub async fn enrich_hash(hash: &str, ctx: &Ctx) -> Enrichment {
 }
 
 async fn run(ctx: &Ctx, term: &str) -> Enrichment {
-    let Some(key) = ctx.key("ABUSE_CH_API_KEY") else {
+    let Some(ref key) = ctx.key("ABUSE_CH_API_KEY") else {
         return Enrichment::failed("threatfox", "clé absente".into());
     };
     match fetch(&ctx.http, term, key).await {

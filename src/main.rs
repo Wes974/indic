@@ -3,13 +3,19 @@
 
 mod api;
 mod asn;
+mod attack;
 mod config;
+mod correlate;
+mod darkweb;
 mod enrich;
 mod feeds;
+mod history;
 mod model;
 mod observable;
 mod push;
 mod ranges;
+mod rate;
+mod stix;
 mod store;
 mod veille;
 mod verdict;
@@ -167,12 +173,22 @@ fn build_ctx(cfg: &Config) -> Result<Arc<enrich::Ctx>> {
     let keys: std::collections::HashMap<String, String> = std::env::vars()
         .filter(|(k, v)| !v.is_empty() && KNOWN_KEYS.contains(&k.as_str()))
         .collect();
+    let keys = std::sync::RwLock::new(keys);
+    let history = if std::env::var("INDIC_HISTORY").is_ok_and(|v| v == "1" || v == "true") {
+        history::History::open(&cfg.data_dir.join("history.db"))
+    } else {
+        None
+    };
+    let attack_map = attack::load_attack_map(&cfg.data_dir.join("cwe2attack.csv"));
     Ok(Arc::new(enrich::Ctx {
         store,
         http,
         keys,
         token: std::env::var("INDIC_TOKEN").ok().filter(|s| !s.is_empty()),
         cache: enrich::Cache::default(),
+        history,
+        rate_limiter: rate::RateLimiter::new(),
+        attack_map,
     }))
 }
 
@@ -210,6 +226,29 @@ async fn serve(cfg: Config) -> Result<()> {
     // Veille proactive (optionnelle) : watchers planifiés → alertes Pushover.
     if std::env::var("INDIC_VEILLE_ENABLED").is_ok_and(|v| v == "1" || v == "true") {
         tokio::spawn(veille::run_loop(ctx.clone(), cfg.data_dir.clone()));
+    }
+
+    // SIGHUP → recharge les clés API à chaud (sans redémarrage du binaire).
+    {
+        let ctx = ctx.clone();
+        tokio::spawn(async move {
+            use tokio::signal::unix::{SignalKind, signal};
+            let Ok(mut sighup) = signal(SignalKind::hangup()) else {
+                return;
+            };
+            while sighup.recv().await.is_some() {
+                tracing::info!("SIGHUP reçu — rechargement des clés API…");
+                let new_keys: std::collections::HashMap<String, String> = std::env::vars()
+                    .filter(|(k, v)| !v.is_empty() && KNOWN_KEYS.contains(&k.as_str()))
+                    .collect();
+                let mut keys = ctx.keys.write().unwrap();
+                let old_count = keys.len();
+                *keys = new_keys;
+                let new_count = keys.len();
+                drop(keys);
+                tracing::info!(old = old_count, new = new_count, "clés rechargées à chaud");
+            }
+        });
     }
 
     let app = api::router(ctx);

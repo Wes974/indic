@@ -4,6 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="theme-color" id="mTheme" content="#0a0e13" />
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22indic%20CTI%22%2C%22short_name%22%3A%22indic%22%2C%22start_url%22%3A%22.%2F%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%230a0e13%22%2C%22theme_color%22%3A%22%230a0e13%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2024%2024'%20fill%3D'none'%253E%253Ccircle%20cx%3D'12'%20cy%3D'6'%20r%3D'4.3'%20stroke%3D'%25234cc9e8'%20stroke-width%3D'1.4'%20opacity%3D'.42'%2F%253E%253Ccircle%20cx%3D'12'%20cy%3D'6'%20r%3D'2.2'%20fill%3D'%25234cc9e8'%2F%253E%253Crect%20x%3D'10.25'%20y%3D'11.3'%20width%3D'3.5'%20height%3D'8.5'%20rx%3D'1.75'%20fill%3D'%25234cc9e8'%2F%253E%253C%2Fsvg%253E%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="indic" />
 <title>indic — CTI lookup</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Ccircle cx='12' cy='6' r='4.3' stroke='%234cc9e8' stroke-width='1.4' opacity='.42'/%3E%3Ccircle cx='12' cy='6' r='2.2' fill='%234cc9e8'/%3E%3Crect x='10.25' y='11.3' width='3.5' height='8.5' rx='1.75' fill='%234cc9e8'/%3E%3C/svg%3E" />
 <style>
@@ -224,6 +227,15 @@ button.chip { cursor: pointer; transition: border-color .15s, color .15s; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .xtra { display: none; }
 .chips.expanded .xtra { display: inline-flex; }
+/* barre de filtres signaux */
+.sbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.chp { font: 400 12px/1 var(--sans); color: var(--ink3); background: var(--card2); border: 1px solid var(--line2); border-radius: 14px; padding: 4px 12px; cursor: pointer; transition: .15s; }
+.chp:hover { border-color: var(--accent-bd); color: var(--ink2); }
+.chp--active { background: var(--accent-bg); border-color: var(--accent-bd); color: var(--accent); font-weight: 600; }
+.fcnt { font-size: 10px; opacity: .65; margin-left: 2px; }
+.chp.c-red { color: var(--h-red); }
+.chp.c-amber { color: var(--h-amber); }
+.chp.c-slate { color: var(--ink3); }
 
 /* ================= identité + verdict ================= */
 .idrow { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-top: 24px; }
@@ -263,6 +275,7 @@ h1.obs {
 .vdetail.secondary .vline b { color: var(--ink2); font-weight: 500; }
 .meta { flex: none; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 .meta .ms { font: 400 12px/1 var(--mono); color: var(--ink3); white-space: nowrap; }
+.meta .exports { display: flex; gap: 4px; }
 .ghost {
   cursor: pointer; background: none;
   border: 1px solid var(--line2); border-radius: 6px;
@@ -306,6 +319,21 @@ h1.obs {
 /* ================= landing (accueil, exemples) ================= */
 #landing { margin-top: 24px; }
 #landing .lintro { margin: 0 0 18px; font: 400 13.5px/1.5 var(--sans); color: var(--ink2); }
+.lstats { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.lstats .lintro { flex-basis: 100%; margin: 0 0 4px; }
+.lstat { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; min-width: 120px; flex: 1; }
+.lstat .lval { font: 700 22px/1.2 var(--sans); color: var(--ink); margin-bottom: 2px; }
+.lstat .llbl { font: 400 11px/1.2 var(--sans); color: var(--ink3); text-transform: uppercase; letter-spacing: .08em; }
+.lkinds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-basis: 100%; padding: 4px 0 0; }
+.lkinds .llbl { font: 400 10px/1 var(--sans); color: var(--ink3); text-transform: uppercase; letter-spacing: .08em; margin-right: 4px; }
+.lchip { font: 500 12px/1 var(--sans); padding: 3px 10px; border-radius: 12px; border: 1px solid transparent; white-space: nowrap; }
+/* IOC extractor */
+.iocex { margin-bottom: 20px; }
+.iocex textarea { width: 100%; box-sizing: border-box; background: var(--card); border: 1px solid var(--line2); border-radius: 10px; padding: 12px 14px; color: var(--ink); font: 400 13px/1.5 var(--sans); resize: vertical; }
+.iocex textarea:focus { border-color: var(--accent-bd); outline: none; }
+.iocex .ghost { margin-top: 8px; }
+.iocex .iocout { margin-top: 10px; gap: 6px; }
+.iocnone { font: 400 12px var(--sans); color: var(--ink3); }
 .lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; align-items: start; }
 .lcard { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: var(--shadow); min-width: 0; }
 .lhead { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -601,7 +629,11 @@ footer {
       </div>
       <div class="meta">
         <span class="ms" id="elapsed"></span>
-        <button class="ghost" id="jsonBtn">json brut</button>
+        <span class="exports">
+          <button class="ghost" id="exportStix">STIX</button>
+          <button class="ghost" id="exportCsv">CSV</button>
+          <button class="ghost" id="jsonBtn">json</button>
+        </span>
       </div>
     </div>
 
@@ -609,6 +641,12 @@ footer {
 
     <section class="sect" id="secSignals" hidden>
       <h2 class="sh">Signaux <span class="cnt" id="cntSignals"></span></h2>
+      <div class="sbar" id="sbarSignals" hidden>
+        <button class="chp chp--active" data-filter="all">Tous <span class="fcnt"></span></button>
+        <button class="chp c-red" data-filter="red">Critiques <span class="fcnt"></span></button>
+        <button class="chp c-amber" data-filter="amber">Suspects <span class="fcnt"></span></button>
+        <button class="chp c-slate" data-filter="slate">Autres <span class="fcnt"></span></button>
+      </div>
       <div class="chips" id="signals"></div>
     </section>
 
@@ -733,13 +771,23 @@ $("themeBtn").onclick = () => {
 
 /* ---------- sémantique couleurs ---------- */
 const SIG_HUE = {
-  malicious: "red", infostealer: "red", abuse: "red", spam: "red", attack: "red", compromised: "red", bot: "red",
+  // Critiques (rouge)
+  malicious: "red", c2: "red", botnet: "red", malware: "red", phishing: "red",
+  infostealer: "red", abuse: "red", spam: "red", attack: "red",
+  compromised: "red", bot: "red", sanctions: "red", exploit: "red",
+  // Suspects (orange/amber)
+  suspicious: "amber", threat: "amber", scanner: "amber", noise: "amber",
+  honeypot: "amber", bruteforce: "amber",
+  // Anonymat (orange)
   vpn: "orange", proxy: "orange", anonymous: "orange",
+  // Tor/relay (violet)
   tor: "purple", relay: "purple",
-  scanner: "amber", noise: "amber", honeypot: "amber", bruteforce: "amber",
+  // Infra (bleu)
   datacenter: "blue", hosting: "blue", cloud: "blue", cdn: "blue",
+  // Bénin (vert)
   residential: "green", benign: "green", clean: "green",
-  infra: "slate",
+  // Info / neutre
+  info: "slate", osint: "slate", infra: "slate",
 };
 const SEVERITY = { red: 0, orange: 1, purple: 2, amber: 3, blue: 4, magenta: 5, cyan: 6, green: 7, slate: 8 };
 const hueOf = (cat) => SIG_HUE[String(cat || "").toLowerCase()] || "slate";
@@ -1045,17 +1093,18 @@ function graphPalette() {
            card: v("--card"), card2: v("--card2"), accent: v("--accent") };
 }
 
-function renderGraph(query, centralKind, pivots) {
+function renderGraph(query, centralKind, pivots, verdictLabel) {
   GRAPH?.destroy();
   GRAPH = null;
   const card = $("graphCard");
   $("glegend").replaceChildren();
   if (pivots.length < 3) { card.hidden = true; return; }
   card.hidden = false;
-  GRAPH = createPivotGraph(card, $("glegend"), query, centralKind, pivots);
+  GRAPH = createPivotGraph(card, $("glegend"), query, centralKind, pivots, verdictLabel);
 }
 
-function createPivotGraph(card, leg, query, centralKind, initialPivots) {
+const VERDICT_HUE = { malicious: "red", suspect: "amber", clean: "green" };
+function createPivotGraph(card, leg, query, centralKind, initialPivots, centralVerdict) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const nodes = [];
@@ -1192,7 +1241,8 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots) {
     for (const nd of nodes) {
       const r = nd.central ? 11 : (nd === hovered ? 8 : 6);
       ctx.beginPath(); ctx.arc(nd.x, nd.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = nd.central ? p.card2 : (p.mark[kindHue(nd.kind)] || p.mark.slate);
+      const vhue = nd.central && centralVerdict ? (VERDICT_HUE[centralVerdict] || null) : null;
+      ctx.fillStyle = nd.central ? (vhue ? p.mark[vhue] : p.card2) : (p.mark[kindHue(nd.kind)] || p.mark.slate);
       ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = nd.central ? p.edge : (nd === hovered ? p.ink : p.card); ctx.stroke();
       if (nd.expanded && !nd.central) {
@@ -1460,6 +1510,16 @@ const LANDING = [
 ];
 function buildLanding(root) {
   root.replaceChildren();
+  const stats = el("div", "lstats"); stats.id = "landingStats"; stats.hidden = true;
+  root.append(stats);
+  // Widget extraction d'IOC
+  const iocWrap = el("div", "iocex"); iocWrap.id = "iocExtract";
+  iocWrap.append(
+    el("textarea", "iocta", null, {placeholder: "Collez un rapport d'incident, des logs… les IOC seront extraits.", rows: 3}),
+    el("button", "ghost", "Extraire les IOC"),
+    el("div", "chips iocout")
+  );
+  root.append(iocWrap);
   root.append(el("p", "lintro", "Analysez n'importe quel observable, ou partez d'un exemple :"));
   const grid = el("div", "lgrid");
   for (const cat of LANDING) {
@@ -1486,6 +1546,62 @@ function showLanding() {
   const l = $("landing");
   if (!l.dataset.built) { buildLanding(l); l.dataset.built = "1"; }
   l.hidden = false;
+  // Dashboard : stats publiques depuis /dashboard
+  fetch("/dashboard").then(r => r.json()).then(d => {
+    if (!d.total_lookups && d.error) return;
+    const s = $("landingStats");
+    s.replaceChildren();
+    s.append(el("p", "lintro", "Dashboard — aperçu des derniers lookups :"));
+    const verdicts = d.verdicts || {};
+    const kinds = Object.entries(d.by_kind || {}).sort((a,b) => b[1] - a[1]).slice(0, 5);
+    const stat = (val, lbl) => { const c = el("div", "lstat"); c.append(el("div", "lval", String(val)), el("div", "llbl", lbl)); return c; };
+    s.append(stat(d.total_lookups || 0, "Lookups"));
+    s.append(stat(verdicts.malicious || 0, "Malveillants"));
+    s.append(stat(verdicts.suspect || 0, "Suspects"));
+    s.append(stat(verdicts.clean || 0, "Légitimes"));
+    if (kinds.length) {
+      const row = el("div", "lkinds");
+      row.append(el("span", "llbl", "Top types"));
+      for (const [k, n] of kinds) {
+        const chip = el("span", "lchip");
+        chip.style.color = `var(--h-${kindHue(k)})`;
+        chip.style.borderColor = `var(--hbd-${kindHue(k)})`;
+        chip.style.background = `var(--hbg-${kindHue(k)})`;
+        chip.textContent = `${k} ${n}`;
+        row.append(chip);
+      }
+      s.append(row);
+    }
+    s.hidden = false;
+  }).catch(() => {});
+  // Widget extraction d'IOC depuis un texte
+  const iocWrap = $("iocExtract");
+  if (iocWrap && !iocWrap.dataset.init) {
+    iocWrap.dataset.init = "1";
+    const ta = iocWrap.querySelector("textarea");
+    const btn = iocWrap.querySelector("button");
+    const out = iocWrap.querySelector(".iocout");
+    btn.onclick = async () => {
+      const txt = ta.value.trim();
+      if (!txt) return;
+      btn.disabled = true; btn.textContent = "…";
+      try {
+        const r = await fetch("/extract", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: txt}) });
+        const d = await r.json();
+        out.replaceChildren();
+        if (!d.iocs?.length) { out.append(el("span", "iocnone", "Aucun IOC détecté")); return; }
+        for (const ioc of d.iocs) {
+          const chip = el("button", "chip pchip lchip");
+          chip.style.color = `var(--h-${kindHue(ioc.type)})`;
+          chip.textContent = trunc(ioc.value, 36);
+          chip.title = ioc.value;
+          chip.onclick = () => go(ioc.value);
+          out.append(chip);
+        }
+      } catch { out.replaceChildren(el("span", "iocnone", "Erreur")); }
+      finally { btn.disabled = false; btn.textContent = "Extraire"; }
+    };
+  }
 }
 
 /* ---------- rendu global ---------- */
@@ -1496,6 +1612,7 @@ function render(data, info) {
   $("err").hidden = true;
   $("skeleton").hidden = true;
   $("landing").hidden = true;
+  $("landingStats").hidden = true;
 
   const rep = $("report");
   rep.hidden = false;
@@ -1527,11 +1644,38 @@ function render(data, info) {
   cntSig.title = data.verdict
     ? `arbitrage : ${VERDICT_META[vlabel]?.label || vlabel} — ${sigs.length} signal(aux), dont ${reds} classé(s) critique`
     : "signaux de menace détectés (critique = malicious/C2/blocklist… en rouge)";
-  chipList($("signals"), sigs, (s) => sigChip(s, true), 30);
+  // Barre de filtre : visible si ≥ 1 signal, avec compteurs.
+  const sbar = $("sbarSignals");
+  sbar.hidden = !sigs.length;
+  if (sigs.length) {
+    // Compteurs par teinte
+    const cnts = { all: sigs.length };
+    for (const s of sigs) { const h = hueOf(s.category); cnts[h] = (cnts[h] || 0) + 1; }
+    sbar.querySelectorAll(".chp").forEach((b) => {
+      const f = b.dataset.filter;
+      const n = f === "all" ? cnts.all : (cnts[f] || 0);
+      const span = b.querySelector(".fcnt");
+      if (span) span.textContent = n > 0 ? `(${n})` : "";
+      if (n === 0 && f !== "all") b.disabled = true;
+    });
+    let activeFilter = "all";
+    const applyFilter = (filter) => {
+      activeFilter = filter;
+      sbar.querySelectorAll(".chp").forEach((b) => b.classList.toggle("chp--active", b.dataset.filter === filter));
+      const filtered = filter === "all" ? sigs : sigs.filter((s) => hueOf(s.category) === filter);
+      chipList($("signals"), filtered, (s) => sigChip(s, true), 30);
+    };
+    sbar.querySelectorAll(".chp").forEach((b) => {
+      b.onclick = () => { if (!b.disabled) applyFilter(b.dataset.filter); };
+    });
+    applyFilter("all");
+  } else {
+    chipList($("signals"), sigs, (s) => sigChip(s, true), 30);
+  }
 
   $("secPivots").hidden = !pivs.length;
   $("cntPivots").textContent = pivs.length;
-  renderGraph(data.ip?.ip || data.query, data.kind, pivs);
+  renderGraph(data.ip?.ip || data.query, data.kind, pivs, data.verdict?.label);
   chipList($("pivots"), pivs, pivotChip, 40);
 
   renderSources(data);
@@ -1629,6 +1773,13 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "/" && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
     e.preventDefault(); $("q").focus(); $("q").select();
   }
+  // Raccourcis filtres signaux : 1=Tous, 2=Critiques, 3=Suspects, 4=Autres
+  if (/^[1-4]$/.test(e.key) && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
+    const filters = ["all", "red", "amber", "slate"];
+    const f = filters[parseInt(e.key) - 1];
+    const btn = document.querySelector(`#sbarSignals .chp[data-filter="${f}"]`);
+    if (btn && !btn.disabled) btn.click();
+  }
 });
 /* clic sur le logo : retour accueil sans recharger (garde clic-milieu / cmd-clic natifs) */
 document.querySelector(".brand").addEventListener("click", (e) => {
@@ -1648,6 +1799,14 @@ $("rawCopy").onclick = () => { if (CUR) copyText(JSON.stringify(CUR, null, 2)); 
 $("jsonBtn").onclick = () => {
   const d = $("rawWrap"); d.open = true;
   d.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+$("exportStix").onclick = () => {
+  if (!LASTQ) return;
+  window.open(`/lookup/export?q=${encodeURIComponent(LASTQ)}&format=stix`, "_blank");
+};
+$("exportCsv").onclick = () => {
+  if (!LASTQ) return;
+  window.open(`/lookup/export?q=${encodeURIComponent(LASTQ)}&format=csv`, "_blank");
 };
 function refreshTokenBtn() {
   const has = !!token();
@@ -1774,6 +1933,16 @@ renderHist();
 const initialQ = new URLSearchParams(location.search).get("q");
 if (initialQ) { $("q").value = initialQ; lookup(initialQ); }
 else showLanding();   // sans requête : page d'accueil (champ vide + entrée = toujours l'IP du visiteur)
+</script>
+<script>
+// Service worker — force update en déréglant toutes les anciennes versions d'abord.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(r => r.unregister());
+  }).finally(() => {
+    navigator.serviceWorker.register('/sw.js');
+  });
+}
 </script>
 </body>
 </html>

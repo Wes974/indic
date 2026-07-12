@@ -19,7 +19,7 @@ use crate::enrich::{Ctx, Enrichment, Fact};
 const FIELDS: &str = "ip,port,protocol,country_name";
 
 pub async fn enrich_ip(ip: IpAddr, ctx: &Ctx) -> Enrichment {
-    let (Some(email), Some(key)) = (ctx.key("FOFA_EMAIL"), ctx.key("FOFA_KEY")) else {
+    let (Some(ref email), Some(ref key)) = (ctx.key("FOFA_EMAIL"), ctx.key("FOFA_KEY")) else {
         return Enrichment::failed("fofa", "email/clé absent".into());
     };
     match fetch(&ctx.http, ip, email, key).await {

@@ -62,7 +62,7 @@ pub async fn ofac(addr: &str, ctx: &Ctx) -> Enrichment {
 
 /// Etherscan V2 (ETH uniquement) : solde + nombre de tx envoyées (nonce). Gated.
 pub async fn etherscan(addr: &str, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("ETHERSCAN_API_KEY") else {
+    let Some(ref key) = ctx.key("ETHERSCAN_API_KEY") else {
         return Enrichment::failed("etherscan", "clé absente".into());
     };
     // Hash de transaction → détails de la tx ; sinon adresse → solde + nonce.

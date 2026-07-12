@@ -14,7 +14,7 @@ use crate::model::Signal;
 const HOST: &str = "api.antitor.com";
 
 pub async fn enrich_ip(ip: IpAddr, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("IKNOWWHATYOUDOWNLOAD_API_KEY") else {
+    let Some(ref key) = ctx.key("IKNOWWHATYOUDOWNLOAD_API_KEY") else {
         return Enrichment::failed("iknowwhatyoudownload", "clé absente".into());
     };
     match fetch(ctx, ip, key).await {

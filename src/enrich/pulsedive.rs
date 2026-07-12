@@ -19,7 +19,7 @@ pub async fn enrich_domain(domain: &str, ctx: &Ctx) -> Enrichment {
 }
 
 async fn run(ctx: &Ctx, indicator: &str) -> Enrichment {
-    let Some(key) = ctx.key("PULSEDIVE_API_KEY") else {
+    let Some(ref key) = ctx.key("PULSEDIVE_API_KEY") else {
         return Enrichment::failed("pulsedive", "clé absente".into());
     };
     match fetch(&ctx.http, indicator, key).await {

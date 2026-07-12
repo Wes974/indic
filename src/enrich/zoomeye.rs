@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use crate::enrich::{Ctx, Enrichment, Fact};
 
 pub async fn enrich_ip(ip: IpAddr, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("ZOOMEYE_API_KEY") else {
+    let Some(ref key) = ctx.key("ZOOMEYE_API_KEY") else {
         return Enrichment::failed("zoomeye", "clé absente".into());
     };
     match fetch(&ctx.http, ip, key).await {

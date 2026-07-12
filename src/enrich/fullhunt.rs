@@ -9,7 +9,7 @@ use crate::enrich::{Ctx, Enrichment, Fact, Pivot};
 const BASE: &str = "https://fullhunt.io";
 
 pub async fn enrich_domain(domain: &str, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("FULLHUNT_API_KEY") else {
+    let Some(ref key) = ctx.key("FULLHUNT_API_KEY") else {
         return Enrichment::failed("fullhunt", "clé absente".into());
     };
     match fetch(ctx, domain, key).await {

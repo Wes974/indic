@@ -8,7 +8,7 @@ use crate::enrich::{Ctx, Enrichment, Fact};
 use crate::model::Signal;
 
 pub async fn enrich_domain(domain: &str, ctx: &Ctx) -> Enrichment {
-    let Some(token) = ctx.key("GITHUB_TOKEN") else {
+    let Some(ref token) = ctx.key("GITHUB_TOKEN") else {
         return Enrichment::failed("github", "clé absente".into());
     };
     match fetch(ctx, domain, token).await {

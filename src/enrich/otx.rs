@@ -30,7 +30,7 @@ pub async fn enrich_url(url: &str, ctx: &Ctx) -> Enrichment {
 }
 
 async fn run(ctx: &Ctx, path: String) -> Enrichment {
-    let Some(key) = ctx.key("OTX_API_KEY") else {
+    let Some(ref key) = ctx.key("OTX_API_KEY") else {
         return Enrichment::failed("otx", "clé absente".into());
     };
     match fetch(ctx, &path, key).await {

@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use crate::enrich::{Ctx, Enrichment, Fact, Pivot};
 
 pub async fn enrich_ip(ip: IpAddr, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("QUAKE_API_KEY") else {
+    let Some(ref key) = ctx.key("QUAKE_API_KEY") else {
         return Enrichment::failed("quake", "clé absente".into());
     };
     match fetch(&ctx.http, ip, key).await {

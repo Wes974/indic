@@ -13,7 +13,7 @@ use crate::model::Signal;
 const BASE: &str = "https://hybrid-analysis.com/api/v2";
 
 pub async fn enrich_hash(hash: &str, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("HYBRIDANALYSIS_API_KEY") else {
+    let Some(ref key) = ctx.key("HYBRIDANALYSIS_API_KEY") else {
         return Enrichment::failed("hybridanalysis", "clé absente".into());
     };
     match fetch(ctx, key, hash).await {

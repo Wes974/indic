@@ -16,7 +16,7 @@ use crate::model::Signal;
 const BASE: &str = "https://tria.ge/api/v0";
 
 pub async fn enrich_hash(hash: &str, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("TRIAGE_API_KEY") else {
+    let Some(ref key) = ctx.key("TRIAGE_API_KEY") else {
         return Enrichment::failed("triage", "clé absente".into());
     };
     match lookup(ctx, key, hash).await {

@@ -23,7 +23,7 @@ pub async fn enrich_hash(hash: &str, ctx: &Ctx) -> Enrichment {
 }
 
 async fn run(ctx: &Ctx, path: String) -> Enrichment {
-    let Some(key) = ctx.key("MALTIVERSE_API_KEY") else {
+    let Some(ref key) = ctx.key("MALTIVERSE_API_KEY") else {
         return Enrichment::failed("maltiverse", "clé absente".into());
     };
     match fetch(&ctx.http, &path, key).await {

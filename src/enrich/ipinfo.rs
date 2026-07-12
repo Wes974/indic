@@ -9,7 +9,7 @@ use crate::enrich::{Ctx, Enrichment, Fact};
 use crate::model::Signal;
 
 pub async fn enrich_ip(ip: IpAddr, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("IPINFO_TOKEN") else {
+    let Some(ref key) = ctx.key("IPINFO_TOKEN") else {
         return Enrichment::failed("ipinfo", "clé absente".into());
     };
     match fetch(&ctx.http, ip, key).await {

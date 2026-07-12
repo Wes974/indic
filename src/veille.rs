@@ -30,7 +30,7 @@ pub struct Alert {
 
 /// État persistant de la veille : par module, les identifiants déjà signalés.
 #[derive(Default, Serialize, Deserialize)]
-struct State {
+pub(crate) struct State {
     /// module → identifiants déjà vus (dédup des alertes).
     seen: HashMap<String, BTreeSet<String>>,
     /// modules déjà amorcés (au 1er run on n'alerte pas, on remplit `seen`).
@@ -59,7 +59,7 @@ impl State {
 
     /// Renvoie les identifiants **neufs** (jamais vus) et les marque vus. Au
     /// premier passage d'un module, amorce en silence (renvoie vide).
-    fn fresh(&mut self, module: &str, ids: impl IntoIterator<Item = String>) -> Vec<String> {
+    pub(crate) fn fresh(&mut self, module: &str, ids: impl IntoIterator<Item = String>) -> Vec<String> {
         let first_run = !self.seeded.contains(module);
         let seen = self.seen.entry(module.to_string()).or_default();
         let mut out = Vec::new();
@@ -86,6 +86,9 @@ pub async fn run_once(ctx: &Ctx, data_dir: &Path) {
     let mut alerts = module_kev(ctx, &mut state).await;
     alerts.extend(module_pastes(ctx, &mut state).await);
     alerts.extend(module_apple(ctx, &mut state).await);
+    alerts.extend(module_watchlist(ctx, &mut state).await);
+    alerts.extend(module_alert_rules(ctx, &mut state).await);
+    alerts.extend(crate::darkweb::run(ctx, &mut state).await);
 
     let n = alerts.len();
     for alert in &alerts {
@@ -136,12 +139,12 @@ async fn notify(ctx: &Ctx, alert: &Alert) {
         return;
     };
     let priority = alert.priority.to_string();
-    let mut form = vec![
-        ("token", token),
-        ("user", user),
+    let mut form: Vec<(&str, &str)> = vec![
+        ("token", &token),
+        ("user", &user),
         ("title", alert.title.as_str()),
         ("message", alert.message.as_str()),
-        ("priority", priority.as_str()),
+        ("priority", &priority),
     ];
     if let Some(u) = &alert.url {
         form.push(("url", u.as_str()));
@@ -375,6 +378,192 @@ fn parse_apple_releases(html: &str) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+/// Liste de domaines surveillés (`INDIC_WATCH_DOMAINS`, virgules).
+fn watch_domains() -> Vec<String> {
+    std::env::var("INDIC_WATCH_DOMAINS")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Module A — watchlist assets perso : nouveaux certs CT (crt.sh) pour les
+/// domaines surveillés, mentions GitHub. Chaque domaine a son propre amorçage.
+async fn module_watchlist(ctx: &Ctx, state: &mut State) -> Vec<Alert> {
+    let domains = watch_domains();
+    if domains.is_empty() {
+        return vec![];
+    }
+    let mut alerts = Vec::new();
+    for domain in &domains {
+        // crt.sh : on recherche les certs émis dans les 48h
+        let url = format!("https://crt.sh/?q=%25.{domain}&output=json&exclude=expired");
+        if let Ok(resp) = ctx.http.get(&url).send().await
+            && let Ok(certs) = resp.json::<serde_json::Value>().await
+                && let Some(arr) = certs.as_array() {
+                    let fresh_ids: Vec<String> = arr
+                        .iter()
+                        .filter_map(|c| {
+                            let id = c
+                                .get("id")
+                                .and_then(|v| v.as_i64())
+                                .map(|n| n.to_string())?;
+                            let _not_before = c.get("not_before").and_then(|v| v.as_str())?;
+                            // Vérifier si le cert est récent (< 7 jours) — en pratique on dédup par id
+                            (!id.is_empty()).then_some(id)
+                        })
+                        .collect();
+                    let module = format!("watchlist:cert:{domain}");
+                    for id in state.fresh(&module, fresh_ids) {
+                        let cert_info = arr.iter().find(|c| {
+                            c.get("id").and_then(|v| v.as_i64()).map(|n| n.to_string())
+                                == Some(id.clone())
+                        });
+                        let name = cert_info
+                            .and_then(|c| c.get("name_value").and_then(|v| v.as_str()))
+                            .unwrap_or(&id);
+                        alerts.push(Alert {
+                            title: format!("Nouveau cert pour {domain}"),
+                            message: format!("Certificat : {name}"),
+                            priority: 0,
+                            url: Some(format!("https://crt.sh/?id={id}")),
+                        });
+                    }
+                }
+        // GitHub : recherche de mentions du domaine
+        if let Some(gh_token) = ctx.key("GITHUB_TOKEN") {
+            let gh_url = format!(
+                "https://api.github.com/search/code?q=%22{domain}%22&sort=indexed&per_page=5"
+            );
+            if let Ok(resp) = ctx
+                .http
+                .get(&gh_url)
+                .header("Authorization", format!("Bearer {gh_token}"))
+                .header("User-Agent", "indic/0.1")
+                .send()
+                .await
+                && let Ok(body) = resp.json::<serde_json::Value>().await
+                    && let Some(items) = body.get("items").and_then(|v| v.as_array()) {
+                        let gh_ids: Vec<String> = items
+                            .iter()
+                            .filter_map(|item| {
+                                item.get("sha").and_then(|v| v.as_str()).map(String::from)
+                            })
+                            .collect();
+                        let module = format!("watchlist:gh:{domain}");
+                        for id in state.fresh(&module, gh_ids) {
+                            if let Some(item) = items
+                                .iter()
+                                .find(|i| i.get("sha").and_then(|v| v.as_str()) == Some(&id))
+                            {
+                                let path = item
+                                    .get("path")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("inconnu");
+                                let repo = item
+                                    .get("repository")
+                                    .and_then(|r| r.get("full_name"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("inconnu");
+                                alerts.push(Alert {
+                                    title: format!("Mention GitHub de {domain}"),
+                                    message: format!("{repo} / {path}"),
+                                    priority: 0,
+                                    url: item
+                                        .get("html_url")
+                                        .and_then(|v| v.as_str())
+                                        .map(String::from),
+                                });
+                            }
+                        }
+                    }
+        }
+    }
+    alerts
+}
+
+/// Règles d'alerte personnalisées (`INDIC_ALERT_RULES` — une règle par ligne,
+/// format `NOM:condition:seuil`). Exemple : `c2_alert:c2:1` → alerte si ≥ 1
+/// signal C2 détecté.
+fn parse_alert_rules() -> Vec<(String, String, u32)> {
+    std::env::var("INDIC_ALERT_RULES")
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let parts: Vec<&str> = line.splitn(3, ':').collect();
+            if parts.len() < 3 {
+                return None;
+            }
+            let threshold = parts[2].parse::<u32>().ok()?;
+            Some((parts[0].to_string(), parts[1].to_string(), threshold))
+        })
+        .collect()
+}
+
+/// Module — règles d'alerte personnalisées : pour chaque domaine/observable
+/// dans `INDIC_ALERT_OBSERVABLES`, vérifie si le nombre de signaux d'une
+/// catégorie donnée dépasse le seuil.
+async fn module_alert_rules(ctx: &Ctx, state: &mut State) -> Vec<Alert> {
+    let rules = parse_alert_rules();
+    if rules.is_empty() {
+        return vec![];
+    }
+    let targets: Vec<String> = std::env::var("INDIC_ALERT_OBSERVABLES")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if targets.is_empty() {
+        return vec![];
+    }
+    let mut alerts = Vec::new();
+    for target in &targets {
+        let obs = match crate::observable::Observable::detect(target) {
+            Some(o) => o,
+            None => continue,
+        };
+        let report = crate::enrich::run(target, &obs, ctx, true).await;
+        let mut signal_counts: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
+        for enr in &report.enrichments {
+            for sig in &enr.signals {
+                *signal_counts.entry(sig.category.clone()).or_default() += 1;
+            }
+        }
+        if let Some(ref ip_r) = report.ip {
+            for sig in &ip_r.signals {
+                *signal_counts.entry(sig.category.clone()).or_default() += 1;
+            }
+        }
+        for (rule_name, category, threshold) in &rules {
+            let count = signal_counts.get(category).copied().unwrap_or(0);
+            if count >= *threshold {
+                let module = format!("alertrule:{rule_name}");
+                let alert_id = format!("{target}:{count}");
+                if !state.fresh(&module, [alert_id.clone()]).is_empty() {
+                    let verdict_label = report.verdict.as_ref().map(|v| v.label).unwrap_or("-");
+                    alerts.push(Alert {
+                        title: format!("Règle « {rule_name} » déclenchée"),
+                        message: format!(
+                            "{} : {} signal(s) « {category} » détecté(s) (verdict: {verdict_label})",
+                            target, count
+                        ),
+                        priority: if *threshold > 1 { 1 } else { 0 },
+                        url: None,
+                    });
+                }
+            }
+        }
+    }
+    alerts
 }
 
 #[cfg(test)]

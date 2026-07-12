@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::enrich::{Ctx, Enrichment, Fact};
 
 pub async fn enrich_ip(ip: IpAddr, ctx: &Ctx) -> Enrichment {
-    let Some(key) = ctx.key("NETLAS_API_KEY") else {
+    let Some(ref key) = ctx.key("NETLAS_API_KEY") else {
         return Enrichment::failed("netlas", "clé absente".into());
     };
     match fetch(&ctx.http, ip, key).await {

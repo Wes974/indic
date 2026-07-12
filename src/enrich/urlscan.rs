@@ -22,7 +22,7 @@ pub async fn enrich_ip(ip: IpAddr, ctx: &Ctx) -> Enrichment {
 }
 
 async fn run(ctx: &Ctx, query: String) -> Enrichment {
-    let Some(key) = ctx.key("URLSCAN_API_KEY") else {
+    let Some(ref key) = ctx.key("URLSCAN_API_KEY") else {
         return Enrichment::failed("urlscan", "clé absente".into());
     };
     match search(ctx, key, &query).await {

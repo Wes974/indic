@@ -29,7 +29,7 @@ pub async fn enrich_domain(domain: &str, ctx: &Ctx) -> Enrichment {
 }
 
 async fn run(ctx: &Ctx, path: String, build: fn(&Value) -> Enrichment) -> Enrichment {
-    let Some(key) = ctx.key("METADEFENDER_API_KEY") else {
+    let Some(ref key) = ctx.key("METADEFENDER_API_KEY") else {
         return Enrichment::failed("metadefender", "clé absente".into());
     };
     match fetch(ctx, &path, key).await {

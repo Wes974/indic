@@ -313,6 +313,15 @@ impl Store {
             ));
         }
 
+        // --- Bogon (adresses réservées / non routables) ---
+        if is_bogon(ip) {
+            signals.push(Signal::with_detail(
+                "bogon",
+                "info",
+                "adresse réservée / non routable (RFC 1918/5735/6598/6890)",
+            ));
+        }
+
         // --- Verdict ---
         let anonymous = is_tor || is_relay || is_vpn || is_proxy;
         let anon_type = if is_tor {
@@ -530,4 +539,42 @@ fn load_blocklists(dir: &Path) -> HashMap<String, HashSet<String>> {
         }
     }
     out
+}
+
+/// Vérifie si une IP est un bogon (adresse réservée / non routable sur
+/// l'Internet public). Basé sur les RFC 1918, 5735, 6598, 6890 et IPv6.
+pub fn is_bogon(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let rfc1918: [ipnet::Ipv4Net; 3] = [
+                "10.0.0.0/8".parse().unwrap(),
+                "172.16.0.0/12".parse().unwrap(),
+                "192.168.0.0/16".parse().unwrap(),
+            ];
+            let special: [ipnet::Ipv4Net; 6] = [
+                "0.0.0.0/8".parse().unwrap(),
+                "100.64.0.0/10".parse().unwrap(),
+                "127.0.0.0/8".parse().unwrap(),
+                "169.254.0.0/16".parse().unwrap(),
+                "192.0.0.0/24".parse().unwrap(),
+                "198.18.0.0/15".parse().unwrap(),
+            ];
+            let multicast: ipnet::Ipv4Net = "224.0.0.0/4".parse().unwrap();
+            let reserved: ipnet::Ipv4Net = "240.0.0.0/4".parse().unwrap();
+            rfc1918.iter().any(|n| n.contains(&v4))
+                || special.iter().any(|n| n.contains(&v4))
+                || multicast.contains(&v4)
+                || reserved.contains(&v4)
+        }
+        IpAddr::V6(v6) => {
+            let bogon6: [ipnet::Ipv6Net; 5] = [
+                "::1/128".parse().unwrap(),
+                "fe80::/10".parse().unwrap(),
+                "fc00::/7".parse().unwrap(),
+                "2001:db8::/32".parse().unwrap(),
+                "ff00::/8".parse().unwrap(),
+            ];
+            bogon6.iter().any(|n| n.contains(&v6))
+        }
+    }
 }

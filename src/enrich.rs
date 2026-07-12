@@ -13,6 +13,7 @@ mod cve;
 mod cvedb;
 mod dns;
 mod dshield;
+mod emailrep;
 mod filescan;
 mod fofa;
 mod fullhunt;
@@ -56,6 +57,7 @@ mod shodan;
 mod stopforumspam;
 mod threatfox;
 mod triage;
+mod url_analysis;
 mod urlhaus;
 mod urlscan;
 mod username;
@@ -376,23 +378,30 @@ pub struct Ctx {
     pub store: Arc<ArcSwap<Store>>,
     /// Client HTTP réutilisé (RDAP, DoH, APIs).
     pub http: reqwest::Client,
-    /// Toutes les clés API non vides, par nom d'env (ex. "VIRUSTOTAL_API_KEY").
-    pub keys: HashMap<String, String>,
+    /// Toutes les clés API non vides, par nom d'env. Hot-swappables via SIGHUP.
+    pub keys: std::sync::RwLock<HashMap<String, String>>,
     /// Token requis pour les enrichers payants. `None` = ouvert (dev).
     pub token: Option<String>,
     /// Cache TTL des résultats d'enrichers réseau.
     pub cache: Cache,
+    /// Historique SQLite des lookups (opt-in, `INDIC_HISTORY=1`).
+    pub history: Option<crate::history::History>,
+    /// Rate limiter par IP (protège les quotas gratuits).
+    pub rate_limiter: crate::rate::RateLimiter,
+    /// Mapping CWE→MITRE ATT&CK (offline).
+    pub attack_map: crate::attack::AttackMap,
 }
 
 impl Ctx {
     /// Clé API par nom d'env, `None` si absente/vide.
-    pub fn key(&self, name: &str) -> Option<&str> {
-        self.keys.get(name).map(String::as_str)
+    pub fn key(&self, name: &str) -> Option<String> {
+        self.keys.read().unwrap().get(name).cloned()
     }
 
     /// Vrai si au moins une clé d'enricher payant est configurée.
     pub fn has_paid_key(&self) -> bool {
-        PAID_IP_KEYS.iter().any(|k| self.key(k).is_some())
+        let keys = self.keys.read().unwrap();
+        PAID_IP_KEYS.iter().any(|k| keys.contains_key(*k))
     }
 }
 
@@ -469,6 +478,13 @@ pub struct Report {
     /// les types sans dimension menace (téléphone, onion, asn…).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verdict: Option<Verdict>,
+    /// Acteurs de menace identifiés (agrégés depuis MalwareBazaar, ThreatFox,
+    /// Triage…). Dédupliqués, en minuscules.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub threat_actors: Vec<String>,
+    /// Score de fraîcheur 0.0-1.0 (1.0 = IOC vu aujourd'hui).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub freshness: Option<f32>,
 }
 
 /// Point d'entrée : dispatch les enrichers puis calcule le **verdict pondéré**
@@ -505,6 +521,10 @@ pub async fn run(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) -> 
             | Observable::Crypto(_)
     );
     report.verdict = (popular || v.raw > 0 || threat_kind).then_some(v);
+    // Acteurs de menace : extraire les noms de famille/malware des enrichers.
+    report.threat_actors = extract_threat_actors(&report);
+    // Score de fraîcheur : 1.0 si vu aujourd'hui, décroît sur 90 jours.
+    report.freshness = compute_freshness(&report);
     report
 }
 
@@ -573,6 +593,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: Some(ip_report),
                 enrichments,
                 pivots,
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Domain(d) => {
@@ -733,6 +755,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments,
                 pivots,
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Cve(c) => {
@@ -772,6 +796,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments,
                 pivots: vec![],
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Hash(h) => {
@@ -904,6 +930,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments,
                 pivots: vec![],
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Email(e) => {
@@ -947,6 +975,17 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                         .await,
                 );
             }
+            if authorized && ctx.key("EMAILREP_API_KEY").is_some() {
+                enrichments.push(
+                    ctx.cache
+                        .get_or(
+                            format!("emailrep:{e}"),
+                            TTL_THREAT,
+                            emailrep::enrich_email(e, ctx),
+                        )
+                        .await,
+                );
+            }
             let mut pivots = Vec::new();
             if let Some(domain) = e.split('@').nth(1) {
                 pivots.push(Pivot {
@@ -962,10 +1001,21 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments,
                 pivots,
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Url(u) => {
+            // Analyse du contenu de l'URL (HEAD + titre) — keyless, best-effort.
+            let url_analysis = ctx.cache
+                .get_or(
+                    format!("url_analysis:{u}"),
+                    TTL_THREAT,
+                    url_analysis::enrich_url(u, ctx),
+                )
+                .await;
             let mut enrichments = vec![
+                url_analysis,
                 ctx.cache
                     .get_or(
                         format!("wayback_url:{u}"),
@@ -1060,6 +1110,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments,
                 pivots,
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Asn(n) => {
@@ -1079,6 +1131,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments: vec![e],
                 pivots,
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Crypto(addr) => {
@@ -1104,6 +1158,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments,
                 pivots,
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Username(u) => {
@@ -1133,6 +1189,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments,
                 pivots: vec![],
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Cidr(cidr) => {
@@ -1167,6 +1225,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: Some(ip_report),
                 enrichments,
                 pivots,
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Phone(p) => {
@@ -1178,6 +1238,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments: vec![e],
                 pivots: vec![],
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Onion(o) => {
@@ -1189,6 +1251,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments: vec![e],
                 pivots: vec![],
+                threat_actors: vec![],
+                freshness: None,
             }
         }
         Observable::Package(p) => {
@@ -1201,6 +1265,8 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 ip: None,
                 enrichments: vec![e],
                 pivots,
+                threat_actors: vec![],
+                freshness: None,
             }
         }
     }
@@ -1513,6 +1579,60 @@ fn host_count(net: &ipnet::IpNet) -> String {
     }
 }
 
+/// Extrait les noms d'acteurs de menace depuis les faits des enrichers
+/// (MalwareBazaar « malware », Triage « family », ThreatFox « malware »).
+fn extract_threat_actors(report: &Report) -> Vec<String> {
+    let mut actors: Vec<String> = report
+        .enrichments
+        .iter()
+        .flat_map(|e| e.facts.iter())
+        .filter(|f| {
+            matches!(
+                f.key.as_str(),
+                "malware" | "family" | "malware_family" | "actor" | "signature"
+            )
+        })
+        .map(|f| f.value.to_lowercase())
+        .filter(|v| !v.is_empty() && v != "unknown" && v != "none" && v != "clean")
+        .collect();
+    actors.sort();
+    actors.dedup();
+    actors
+}
+
+/// Score de fraîcheur 0.0–1.0 basé sur la date la plus récente trouvée dans les
+/// faits des enrichers. 1.0 = vu aujourd'hui, décroît linéairement sur 90 jours.
+fn compute_freshness(report: &Report) -> Option<f32> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let _now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut best_age: Option<u64> = None;
+    for enr in &report.enrichments {
+        for fact in &enr.facts {
+            let age = match fact.key.as_str() {
+                "last_seen" | "last_seen_days" | "age_days" => {
+                    fact.value.parse::<u64>().ok().map(|d| d * 86400)
+                }
+                "first_seen" => {
+                    // first_seen n'est pas la date la plus récente, mais on le prend
+                    // comme upper bound.
+                    fact.value.parse::<u64>().ok().map(|d| d * 86400)
+                }
+                _ => None,
+            };
+            if let Some(dur) = age {
+                best_age = Some(best_age.map_or(dur, |b| b.min(dur)));
+            }
+        }
+    }
+    best_age.map(|age_secs| {
+        let max_age: u64 = 90 * 86400; // 90 jours
+        ((max_age.saturating_sub(age_secs) as f32) / max_age as f32).clamp(0.0, 1.0)
+    })
+}
+
 /// Réponse minimale pour un type détecté mais pas encore enrichi.
 fn stub(query: &str, obs: &Observable) -> Report {
     let e = Enrichment::ok(
@@ -1529,5 +1649,7 @@ fn stub(query: &str, obs: &Observable) -> Report {
         ip: None,
         enrichments: vec![e],
         pivots: vec![],
+        threat_actors: vec![],
+        freshness: None,
     }
 }

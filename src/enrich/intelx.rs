@@ -20,7 +20,7 @@ pub async fn enrich_email(email: &str, ctx: &Ctx) -> Enrichment {
 }
 
 async fn run(ctx: &Ctx, term: &str) -> Enrichment {
-    let Some(key) = ctx.key("INTELX_API_KEY") else {
+    let Some(ref key) = ctx.key("INTELX_API_KEY") else {
         return Enrichment::failed("intelx", "clé absente".into());
     };
     match search(ctx, key, term).await {
@@ -33,7 +33,7 @@ async fn run(ctx: &Ctx, term: &str) -> Enrichment {
 /// (monitoring de mots-clés). Renvoie les enregistrements pour dédup côté appelant.
 pub async fn search_terms(ctx: &Ctx, term: &str) -> Result<Vec<Record>> {
     let key = ctx.key("INTELX_API_KEY").context("clé IntelX absente")?;
-    search(ctx, key, term).await
+    search(ctx, &key, term).await
 }
 
 async fn search(ctx: &Ctx, key: &str, term: &str) -> Result<Vec<Record>> {

@@ -412,3 +412,6 @@ mod key_invariants {
         );
     }
 }
+
+#[cfg(test)]
+mod tests_integration;

@@ -19,7 +19,7 @@ use crate::push;
 /// Contexte partagé (datasets hot-swappables + client HTTP).
 pub type SharedCtx = Arc<Ctx>;
 
-const INDEX_HTML: &str = include_str!("web/index.html");
+const INDEX_HTML: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
 pub fn router(ctx: SharedCtx) -> Router {
     Router::new()
@@ -36,9 +36,11 @@ pub fn router(ctx: SharedCtx) -> Router {
         .route("/dashboard", get(dashboard))
         .route("/extract", post(extract_iocs))
         .route("/correlate", get(correlate_q))
+        .route("/compare", post(compare))
         // Alias historiques (compat).
         .route("/v1/check", get(check_query))
         .route("/ip/{addr}", get(check_path))
+        .layer(tower_http::compression::CompressionLayer::new())
         .with_state(ctx)
 }
 
@@ -142,6 +144,13 @@ struct BulkQ {
     token: Option<String>,
     /// `stix` ou `csv` — si présent, exporte tous les résultats au lieu de JSON.
     format: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CompareQ {
+    a: String,
+    b: String,
+    token: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -661,4 +670,29 @@ fn client_ip(headers: &HeaderMap) -> Option<String> {
         }
     }
     None
+}
+
+/// `POST /compare` — enrichit deux observables en parallèle, retourne les
+/// deux rapports complets côte à côte pour comparaison.
+async fn compare(
+    State(ctx): State<SharedCtx>,
+    headers: HeaderMap,
+    Json(body): Json<CompareQ>,
+) -> Response {
+    let auth = authorized(&ctx, &headers, body.token.as_deref());
+    let (a, b) = tokio::join!(
+        async {
+            match Observable::detect(&body.a) {
+                Some(o) => Some(enrich::run(&body.a, &o, &ctx, auth).await),
+                None => None,
+            }
+        },
+        async {
+            match Observable::detect(&body.b) {
+                Some(o) => Some(enrich::run(&body.b, &o, &ctx, auth).await),
+                None => None,
+            }
+        },
+    );
+    Json(json!({ "a": a, "b": b })).into_response()
 }

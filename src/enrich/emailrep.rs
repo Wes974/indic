@@ -78,18 +78,19 @@ pub async fn enrich_email(email: &str, ctx: &Ctx) -> Enrichment {
                 }
                 for key in &["domain_reputation", "spam", "spoofable", "social_medias"] {
                     if let Some(val) = details.get(*key).and_then(|v| v.as_bool())
-                        && (!val || matches!(*key, "spam")) {
-                            facts.push(Fact::new(
-                                key,
-                                if val {
-                                    "oui"
-                                } else if *key == "spam" {
-                                    "non"
-                                } else {
-                                    "ok"
-                                },
-                            ));
-                        }
+                        && (!val || matches!(*key, "spam"))
+                    {
+                        facts.push(Fact::new(
+                            key,
+                            if val {
+                                "oui"
+                            } else if *key == "spam" {
+                                "non"
+                            } else {
+                                "ok"
+                            },
+                        ));
+                    }
                 }
             }
 

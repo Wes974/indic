@@ -43,7 +43,13 @@ pub fn router(ctx: SharedCtx) -> Router {
 }
 
 async fn index() -> impl IntoResponse {
-    ([(axum::http::header::CACHE_CONTROL, "no-cache, no-store, must-revalidate")], Html(INDEX_HTML))
+    (
+        [(
+            axum::http::header::CACHE_CONTROL,
+            "no-cache, no-store, must-revalidate",
+        )],
+        Html(INDEX_HTML),
+    )
 }
 
 async fn healthz() -> &'static str {
@@ -134,6 +140,8 @@ struct LookupQ {
 struct BulkQ {
     queries: Vec<String>,
     token: Option<String>,
+    /// `stix` ou `csv` — si présent, exporte tous les résultats au lieu de JSON.
+    format: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -243,8 +251,9 @@ async fn lookup_export(
     }
 }
 
-/// `POST /lookup/bulk` — enrichit plusieurs observables en parallèle.
-/// Body JSON : `{"queries": ["1.1.1.1", "evil.com"], "token": "..."}`.
+/// `POST /lookup/bulk` — enrichit jusqu'à 20 observables en parallèle.
+/// Body JSON : `{"queries": [...], "token": "...", "format": "stix|csv"}`.
+/// Sans `format` → résumé JSON. Avec → export STIX 2.1 ou CSV agrégé.
 async fn lookup_bulk(
     State(ctx): State<SharedCtx>,
     headers: HeaderMap,
@@ -268,15 +277,64 @@ async fn lookup_bulk(
                 match obs {
                     Some(o) => {
                         let r = enrich::run(&raw, &o, &ctx, auth).await;
-                        json!({ "query": raw, "kind": r.kind, "verdict": r.verdict, "ok": true })
+                        (raw, Some(r))
                     }
-                    None => json!({ "query": raw, "error": "observable non reconnu", "ok": false }),
+                    None => (raw, None),
                 }
             }
         })
         .collect();
-    let results = futures::future::join_all(futs).await;
-    Json(json!({ "results": results })).into_response()
+    let results: Vec<_> = futures::future::join_all(futs).await;
+
+    match body.format.as_deref() {
+        Some("stix") | Some("stix21") => {
+            let bundles: Vec<_> = results
+                .iter()
+                .filter_map(|(_, r)| r.as_ref())
+                .map(crate::stix::to_stix21)
+                .collect();
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/stix+json")],
+                Json(json!({ "type": "bundle", "objects": bundles.into_iter().flat_map(|b| b["objects"].as_array().cloned().unwrap_or_default()).collect::<Vec<_>>() })),
+            )
+                .into_response()
+        }
+        Some("csv") => {
+            let csvs: Vec<String> = results
+                .iter()
+                .filter_map(|(_, r)| r.as_ref())
+                .map(crate::stix::to_csv)
+                .collect();
+            // Garder l'en-tête du premier CSV, enlever les suivants.
+            let header_end = csvs
+                .first()
+                .map_or(0, |c| c.find('\n').map_or(c.len(), |i| i + 1));
+            let body: String = csvs
+                .iter()
+                .enumerate()
+                .map(|(i, c)| if i == 0 { c.as_str() } else { &c[header_end..] })
+                .collect();
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "text/csv")],
+                body,
+            )
+                .into_response()
+        }
+        _ => {
+            let summary: Vec<_> = results
+                .into_iter()
+                .map(|(raw, r)| match r {
+                    Some(r) => {
+                        json!({ "query": raw, "kind": r.kind, "verdict": r.verdict, "ok": true })
+                    }
+                    None => json!({ "query": raw, "error": "observable non reconnu", "ok": false }),
+                })
+                .collect();
+            Json(json!({ "results": summary })).into_response()
+        }
+    }
 }
 
 /// `GET /history?limit=50` — N derniers lookups (opt-in, gated).
@@ -319,46 +377,74 @@ async fn dashboard(
     Query(q): Query<TokenQ>,
 ) -> Response {
     let Some(ref h) = ctx.history else {
-        return (StatusCode::NOT_FOUND, Json(json!({ "error": "historique non activé (INDIC_HISTORY=1)" }))).into_response();
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "historique non activé (INDIC_HISTORY=1)" })),
+        )
+            .into_response();
     };
     let gated = authorized(&ctx, &headers, q.token.as_deref());
     // Stats publiques (anonymisées) : toujours dispo.
     let recent = h.recent(100);
     let total = recent.len() as u64;
-    let by_kind: std::collections::HashMap<String, u64> = recent.iter().fold(
-        std::collections::HashMap::new(),
-        |mut acc, e| { *acc.entry(e.kind.clone()).or_default() += 1; acc },
-    );
-    let malicious = recent.iter().filter(|e| e.verdict_label.as_deref() == Some("malicious")).count() as u64;
-    let suspect = recent.iter().filter(|e| e.verdict_label.as_deref() == Some("suspect")).count() as u64;
-    let clean = recent.iter().filter(|e| e.verdict_label.as_deref() == Some("clean")).count() as u64;
+    let by_kind: std::collections::HashMap<String, u64> =
+        recent
+            .iter()
+            .fold(std::collections::HashMap::new(), |mut acc, e| {
+                *acc.entry(e.kind.clone()).or_default() += 1;
+                acc
+            });
+    let malicious = recent
+        .iter()
+        .filter(|e| e.verdict_label.as_deref() == Some("malicious"))
+        .count() as u64;
+    let suspect = recent
+        .iter()
+        .filter(|e| e.verdict_label.as_deref() == Some("suspect"))
+        .count() as u64;
+    let clean = recent
+        .iter()
+        .filter(|e| e.verdict_label.as_deref() == Some("clean"))
+        .count() as u64;
     let mut base = json!({
         "total_lookups": total,
         "by_kind": by_kind,
         "verdicts": { "malicious": malicious, "suspect": suspect, "clean": clean },
     });
     // Détails gated : derniers lookups avec query.
-    if gated
-        && let Some(obj) = base.as_object_mut()
-    {
-        obj.insert("recent".into(), json!(recent.iter().take(20).collect::<Vec<_>>()));
+    if gated && let Some(obj) = base.as_object_mut() {
+        obj.insert(
+            "recent".into(),
+            json!(recent.iter().take(20).collect::<Vec<_>>()),
+        );
     }
     Json(base).into_response()
 }
 
 /// `POST /extract` — extrait les IOC d'un texte (IP, domaines, hashes, CVE, URLs, emails).
 #[derive(Deserialize)]
-struct ExtractQ { text: String }
+struct ExtractQ {
+    text: String,
+}
 async fn extract_iocs(Json(body): Json<ExtractQ>) -> Response {
     use crate::observable::Observable;
     let mut iocs: Vec<serde_json::Value> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     // Découper le texte en tokens par whitespace/punctuation
-    for token in body.text.split(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_' && c != '@' && c != ':' && c != '/') {
-        let token = token.trim().trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-');
-        if token.is_empty() || token.len() > 300 { continue; }
+    for token in body.text.split(|c: char| {
+        !c.is_alphanumeric() && c != '.' && c != '-' && c != '_' && c != '@' && c != ':' && c != '/'
+    }) {
+        let token = token
+            .trim()
+            .trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '-');
+        if token.is_empty() || token.len() > 300 {
+            continue;
+        }
         // Exclure les numéros de version, dates, etc.
-        if token.chars().all(|c| c.is_ascii_digit() || c == '.') && token.matches('.').count() <= 1 { continue; }
+        if token.chars().all(|c| c.is_ascii_digit() || c == '.') && token.matches('.').count() <= 1
+        {
+            continue;
+        }
         if let Some(obs) = Observable::detect(token) {
             let v = token.to_lowercase();
             if seen.insert(v.clone()) {
@@ -366,9 +452,13 @@ async fn extract_iocs(Json(body): Json<ExtractQ>) -> Response {
                     Observable::Ip(_) => iocs.push(json!({"type": "ip", "value": v})),
                     Observable::Cidr(_) => iocs.push(json!({"type": "ip", "value": v})),
                     Observable::Domain(_) => iocs.push(json!({"type": "domain", "value": v})),
-                    Observable::Url(_) => iocs.push(json!({"type": "url", "value": token.to_string()})),
+                    Observable::Url(_) => {
+                        iocs.push(json!({"type": "url", "value": token.to_string()}))
+                    }
                     Observable::Hash(_) => iocs.push(json!({"type": "hash", "value": v})),
-                    Observable::Cve(_) => iocs.push(json!({"type": "cve", "value": token.to_uppercase()})),
+                    Observable::Cve(_) => {
+                        iocs.push(json!({"type": "cve", "value": token.to_uppercase()}))
+                    }
                     Observable::Email(_) => iocs.push(json!({"type": "email", "value": v})),
                     _ => {}
                 }
@@ -463,9 +553,10 @@ async fn dispatch_and_record(ctx: &Ctx, raw: &str, auth: bool) -> Response {
             if let Some(ref h) = ctx.history {
                 let correlations = crate::correlate::correlate(raw, obs.kind(), h);
                 if !correlations.is_empty()
-                    && let Some(obj) = resp.as_object_mut() {
-                        obj.insert("correlations".into(), json!(correlations));
-                    }
+                    && let Some(obj) = resp.as_object_mut()
+                {
+                    obj.insert("correlations".into(), json!(correlations));
+                }
             }
             // Ajouter le mapping ATT&CK pour les CVE
             if let Observable::Cve(_) = obs {
@@ -481,9 +572,10 @@ async fn dispatch_and_record(ctx: &Ctx, raw: &str, auth: bool) -> Response {
                 if !cwes.is_empty() {
                     let attack_signals = crate::attack::attack_signals(&cwes, &ctx.attack_map);
                     if !attack_signals.is_empty()
-                        && let Some(obj) = resp.as_object_mut() {
-                            obj.insert("mitre_attack".into(), json!(attack_signals));
-                        }
+                        && let Some(obj) = resp.as_object_mut()
+                    {
+                        obj.insert("mitre_attack".into(), json!(attack_signals));
+                    }
                 }
             }
             Json(resp).into_response()

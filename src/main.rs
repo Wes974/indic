@@ -15,6 +15,7 @@ mod observable;
 mod push;
 mod ranges;
 mod rate;
+mod registry;
 mod stix;
 mod store;
 mod veille;
@@ -180,6 +181,7 @@ fn build_ctx(cfg: &Config) -> Result<Arc<enrich::Ctx>> {
         None
     };
     let attack_map = attack::load_attack_map(&cfg.data_dir.join("cwe2attack.csv"));
+    let registry = Arc::new(registry::build());
     Ok(Arc::new(enrich::Ctx {
         store,
         http,
@@ -188,6 +190,7 @@ fn build_ctx(cfg: &Config) -> Result<Arc<enrich::Ctx>> {
         cache: enrich::Cache::default(),
         history,
         rate_limiter: rate::RateLimiter::new(),
+        registry,
         attack_map,
     }))
 }

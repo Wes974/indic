@@ -54,7 +54,7 @@ pub fn correlate(query: &str, kind: &str, history: &History) -> Vec<Correlation>
             let related = history_recent_like(
                 history,
                 "domain",
-                &format!("%{}%", &query.chars().take(20).collect::<String>()),
+                &format!("%{}%", query.chars().take(20).collect::<String>()),
                 query,
                 10,
             );

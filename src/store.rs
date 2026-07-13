@@ -174,23 +174,17 @@ impl Store {
 
     /// Géolocalisation précise (ville/région/coord.) via GeoLite2, si disponible.
     pub fn geoip_city(&self, ip: IpAddr) -> Option<GeoCity> {
-        let c: maxminddb::geoip2::City = self.geoip.as_ref()?.lookup(ip).ok()?;
-        let en = |n: &Option<std::collections::BTreeMap<&str, &str>>| {
-            n.as_ref().and_then(|m| m.get("en").map(|s| s.to_string()))
-        };
+        let result = self.geoip.as_ref()?.lookup(ip).ok()?;
+        let c: maxminddb::geoip2::City = result.decode().ok()??;
         Some(GeoCity {
-            city: c.city.as_ref().and_then(|x| en(&x.names)),
+            city: c.city.names.english.map(|s| s.to_string()),
             region: c
                 .subdivisions
-                .as_ref()
-                .and_then(|v| v.first())
-                .and_then(|d| en(&d.names)),
-            country: c
-                .country
-                .as_ref()
-                .and_then(|x| x.iso_code.map(str::to_string)),
-            lat: c.location.as_ref().and_then(|l| l.latitude),
-            lon: c.location.as_ref().and_then(|l| l.longitude),
+                .first()
+                .and_then(|d| d.names.english.map(|s| s.to_string())),
+            country: c.country.iso_code.map(str::to_string),
+            lat: c.location.latitude,
+            lon: c.location.longitude,
         })
     }
 

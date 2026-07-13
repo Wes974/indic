@@ -21,7 +21,7 @@ pub struct HistoryEntry {
     pub verdict_score: Option<i32>,
     pub source_count: u32,
     pub signal_count: u32,
-    pub ts: u64,
+    pub ts: i64,
 }
 
 impl History {
@@ -63,7 +63,7 @@ impl History {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
-            .as_secs();
+            .as_secs() as i64;
         let conn = self.conn.lock().unwrap();
         let _ = conn.execute(
             "INSERT INTO lookups (query, kind, verdict_label, verdict_score, source_count, signal_count, ts) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -128,14 +128,14 @@ impl History {
 
     /// Purge les entrées plus anciennes que `max_age_days`.
     #[allow(dead_code)]
-    pub fn purge_older_than(&self, max_age_days: u32) -> u64 {
+    pub fn purge_older_than(&self, max_age_days: u32) -> i64 {
         let conn = self.conn.lock().unwrap();
         let cutoff = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs()
-            .saturating_sub(max_age_days as u64 * 86400);
+            .saturating_sub(max_age_days as u64 * 86400) as i64;
         conn.execute("DELETE FROM lookups WHERE ts < ?1", params![cutoff])
-            .unwrap_or(0) as u64
+            .unwrap_or(0) as i64
     }
 }

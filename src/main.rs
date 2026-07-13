@@ -131,6 +131,8 @@ enum Cmd {
         #[arg(long)]
         test: bool,
     },
+    /// Génère un script de complétion shell (bash, zsh, fish).
+    Completions { shell: clap_complete::Shell },
 }
 
 #[tokio::main]
@@ -157,6 +159,12 @@ async fn main() -> Result<()> {
                 veille::run_once(&ctx, &cfg.data_dir).await;
             }
         }
+        Cmd::Completions { shell } => {
+            use clap_complete::generate;
+            let mut cmd = <Cli as clap::CommandFactory>::command();
+            let name = cmd.get_name().to_string();
+            generate(shell, &mut cmd, &name, &mut std::io::stdout());
+        }
         Cmd::Serve => serve(cfg).await?,
     }
     Ok(())
@@ -174,7 +182,7 @@ fn build_ctx(cfg: &Config) -> Result<Arc<enrich::Ctx>> {
     let keys: std::collections::HashMap<String, String> = std::env::vars()
         .filter(|(k, v)| !v.is_empty() && KNOWN_KEYS.contains(&k.as_str()))
         .collect();
-    let keys = std::sync::RwLock::new(keys);
+    let keys = parking_lot::RwLock::new(keys);
     let history = if std::env::var("INDIC_HISTORY").is_ok_and(|v| v == "1" || v == "true") {
         history::History::open(&cfg.data_dir.join("history.db"))
     } else {
@@ -244,7 +252,7 @@ async fn serve(cfg: Config) -> Result<()> {
                 let new_keys: std::collections::HashMap<String, String> = std::env::vars()
                     .filter(|(k, v)| !v.is_empty() && KNOWN_KEYS.contains(&k.as_str()))
                     .collect();
-                let mut keys = ctx.keys.write().unwrap();
+                let mut keys = ctx.keys.write();
                 let old_count = keys.len();
                 *keys = new_keys;
                 let new_count = keys.len();
@@ -258,14 +266,42 @@ async fn serve(cfg: Config) -> Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
     tracing::info!("indic écoute sur http://{}", cfg.bind);
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    use tokio::signal;
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => tracing::info!("SIGINT reçu, arrêt gracieux…"),
+        _ = terminate => tracing::info!("SIGTERM reçu, arrêt gracieux…"),
+    }
 }
 
 fn init_tracing() {
     use tracing_subscriber::{EnvFilter, fmt};
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    fmt().with_env_filter(filter).init();
+    if std::env::var("INDIC_LOG_JSON").is_ok_and(|v| v == "1") {
+        fmt().json().with_env_filter(filter).init();
+    } else {
+        fmt().with_env_filter(filter).init();
+    }
 }
 
 /// Sortie terminal lisible pour `indic lookup`.

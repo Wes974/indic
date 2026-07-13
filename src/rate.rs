@@ -1,8 +1,8 @@
 //! Rate limiter simple par IP (token bucket in-memory). Borne le nombre de
 //! requêtes par minute pour protéger les quotas des sources gratuites.
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::time::Instant;
 
 /// Nombre de requêtes autorisées par fenêtre (par défaut 30/min pour les non-autorisés).
@@ -31,7 +31,7 @@ impl RateLimiter {
     /// Vérifie si `ip` peut émettre une requête. Retourne `true` si autorisé,
     /// `false` si la limite est atteinte.
     pub fn allow(&self, ip: &str) -> bool {
-        let mut map = self.inner.lock().unwrap();
+        let mut map = self.inner.lock();
         let now = Instant::now();
         let entry = map.entry(ip.to_string()).or_insert(Window {
             start: now,
@@ -52,7 +52,7 @@ impl RateLimiter {
     /// Nombre de requêtes restantes pour `ip`.
     #[allow(dead_code)]
     pub fn remaining(&self, ip: &str) -> u32 {
-        let map = self.inner.lock().unwrap();
+        let map = self.inner.lock();
         let now = Instant::now();
         if let Some(entry) = map.get(ip)
             && now.duration_since(entry.start).as_secs() < WINDOW_SECS

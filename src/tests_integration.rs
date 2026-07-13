@@ -20,7 +20,7 @@ fn test_ctx() -> Arc<enrich::Ctx> {
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap();
-    let keys = std::sync::RwLock::new(HashMap::new());
+    let keys = parking_lot::RwLock::new(HashMap::new());
     let registry = Arc::new(crate::registry::build());
     let attack_map = HashMap::new();
     Arc::new(enrich::Ctx {

@@ -2,10 +2,10 @@
 //! Enregistre une entrée par lookup, avec l'observable, le verdict, la date.
 //! Alimente le dashboard privé et la corrélation inter-observables.
 
+use parking_lot::Mutex;
 use rusqlite::{Connection, params};
 use serde::Serialize;
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct History {
@@ -64,7 +64,7 @@ impl History {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let _ = conn.execute(
             "INSERT INTO lookups (query, kind, verdict_label, verdict_score, source_count, signal_count, ts) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![query, kind, verdict_label, verdict_score, source_count, signal_count, now],
@@ -73,7 +73,7 @@ impl History {
 
     /// Récupère les N derniers lookups.
     pub fn recent(&self, limit: u32) -> Vec<HistoryEntry> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
                 "SELECT id, query, kind, verdict_label, verdict_score, source_count, signal_count, ts
@@ -100,7 +100,7 @@ impl History {
     /// Recherche des observables corrélés (même préfixe, type similaire…).
     #[allow(dead_code)]
     pub fn correlated(&self, query: &str, kind: &str, limit: u32) -> Vec<HistoryEntry> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let pattern = format!("%{}%", query.chars().take(20).collect::<String>());
         let mut stmt = conn
             .prepare(
@@ -129,7 +129,7 @@ impl History {
     /// Purge les entrées plus anciennes que `max_age_days`.
     #[allow(dead_code)]
     pub fn purge_older_than(&self, max_age_days: u32) -> i64 {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock();
         let cutoff = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()

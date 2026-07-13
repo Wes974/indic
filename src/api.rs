@@ -41,7 +41,33 @@ pub fn router(ctx: SharedCtx) -> Router {
         .route("/v1/check", get(check_query))
         .route("/ip/{addr}", get(check_path))
         .layer(tower_http::compression::CompressionLayer::new())
+        .layer(axum::middleware::from_fn(security_headers))
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(1024 * 1024)) // 1 MiB
         .with_state(ctx)
+}
+
+/// Ajoute les en-têtes de sécurité sur toutes les réponses HTML.
+async fn security_headers(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert(
+        axum::http::header::CONTENT_SECURITY_POLICY,
+        axum::http::HeaderValue::from_static(
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+        ),
+    );
+    headers.insert(
+        axum::http::HeaderName::from_static("x-content-type-options"),
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        axum::http::HeaderName::from_static("referrer-policy"),
+        axum::http::HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+    response
 }
 
 async fn index() -> impl IntoResponse {

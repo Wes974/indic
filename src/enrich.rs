@@ -69,11 +69,12 @@ pub(crate) mod vulners;
 pub(crate) mod wayback;
 pub(crate) mod zoomeye;
 
+use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
@@ -160,7 +161,6 @@ impl Cache {
     fn source_sem(&self, source: &str) -> Arc<Semaphore> {
         self.host_sems
             .lock()
-            .unwrap()
             .entry(source.to_string())
             .or_insert_with(|| Arc::new(Semaphore::new(PER_SOURCE_MAX)))
             .clone()
@@ -170,7 +170,6 @@ impl Cache {
     fn stat(&self, source: &str) -> Arc<SourceStat> {
         self.stats
             .lock()
-            .unwrap()
             .entry(source.to_string())
             .or_default()
             .clone()
@@ -178,7 +177,7 @@ impl Cache {
 
     /// Snapshot trié des compteurs par source (pour `/metrics`).
     pub fn metrics(&self) -> Vec<SourceMetric> {
-        let map = self.stats.lock().unwrap();
+        let map = self.stats.lock();
         let mut out: Vec<SourceMetric> = map
             .iter()
             .map(|(source, s)| {
@@ -257,7 +256,7 @@ impl Cache {
     /// Insère en bornant la taille (au plafond, évince la moitié la plus
     /// ancienne). Sert aux entrées positives comme négatives.
     fn insert_bounded(&self, key: String, enr: Enrichment) {
-        let mut map = self.inner.lock().unwrap();
+        let mut map = self.inner.lock();
         if map.len() >= CACHE_MAX {
             let mut times: Vec<Instant> = map.values().map(|(t, _)| *t).collect();
             times.sort_unstable();
@@ -268,7 +267,7 @@ impl Cache {
     }
 
     fn peek(&self, key: &str, ttl: Duration) -> Option<Enrichment> {
-        let map = self.inner.lock().unwrap();
+        let map = self.inner.lock();
         let (at, enr) = map.get(key)?;
         // Entrée en erreur → TTL court (NEG_TTL) : on retente la source plus
         // vite qu'un succès mémorisé.
@@ -355,7 +354,7 @@ pub struct Ctx {
     /// Client HTTP réutilisé (RDAP, DoH, APIs).
     pub http: reqwest::Client,
     /// Toutes les clés API non vides, par nom d'env. Hot-swappables via SIGHUP.
-    pub keys: std::sync::RwLock<HashMap<String, String>>,
+    pub keys: RwLock<HashMap<String, String>>,
     /// Token requis pour les enrichers payants. `None` = ouvert (dev).
     pub token: Option<String>,
     /// Cache TTL des résultats d'enrichers réseau.
@@ -373,7 +372,7 @@ pub struct Ctx {
 impl Ctx {
     /// Clé API par nom d'env, `None` si absente/vide.
     pub fn key(&self, name: &str) -> Option<String> {
-        self.keys.read().unwrap().get(name).cloned()
+        self.keys.read().get(name).cloned()
     }
 
     /// Vrai si au moins une clé d'enricher payant est configurée.

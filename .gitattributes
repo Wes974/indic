@@ -1,0 +1,3 @@
+* text=auto eol=lf
+Cargo.lock linguist-generated=true
+*.rs linguist-language=Rust diff=rust

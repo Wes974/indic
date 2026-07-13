@@ -1,0 +1,32 @@
+name: Feature Request
+description: Suggest an idea for indic
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Please check the [existing issues](https://github.com/Wes974/indic/issues)
+        and [ROADMAP.md](https://github.com/Wes974/indic/blob/main/ROADMAP.md) first.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem are you trying to solve? What's the use case?
+      placeholder: "I want to compare two IPs side by side to see which is more suspicious."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like indic to do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds or alternative approaches you've tried?

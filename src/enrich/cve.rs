@@ -8,7 +8,10 @@ use crate::enrich::{Ctx, Enrichment, Fact};
 pub async fn enrich_cve(cve: &str, ctx: &Ctx) -> Enrichment {
     // Clé NVD optionnelle : lève le rate-limit (5 → 50 req/30s) si présente.
     let nvd_key = ctx.key("NVD_API_KEY");
-    let (nvd_res, epss_res) = tokio::join!(nvd(&ctx.http, cve, nvd_key.as_deref()), epss(&ctx.http, cve));
+    let (nvd_res, epss_res) = tokio::join!(
+        nvd(&ctx.http, cve, nvd_key.as_deref()),
+        epss(&ctx.http, cve)
+    );
 
     let mut facts = Vec::new();
     let mut err = None;

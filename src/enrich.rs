@@ -1,77 +1,76 @@
 //! Dispatch d'enrichissement : détecte les enrichers concernés par l'observable,
 //! les lance en parallèle et fusionne en un rapport générique.
 
-mod abuseipdb;
-mod blocklists;
-mod censys;
-mod certspotter;
-mod circl_hashlookup;
-mod criminalip;
-mod crtsh;
-mod crypto;
-mod cve;
-mod cvedb;
-mod dns;
-mod dshield;
-mod emailrep;
-mod filescan;
-mod fofa;
-mod fullhunt;
-mod github;
-mod gravatar;
-mod greynoise;
-mod hudsonrock;
-mod hunter;
-mod hybridanalysis;
-mod ikwyd;
+pub(crate) mod abuseipdb;
+pub(crate) mod blocklists;
+pub(crate) mod censys;
+pub(crate) mod certspotter;
+pub(crate) mod circl_hashlookup;
+pub(crate) mod criminalip;
+pub(crate) mod crtsh;
+pub(crate) mod crypto;
+pub(crate) mod cve;
+pub(crate) mod cvedb;
+pub(crate) mod dns;
+pub(crate) mod dshield;
+pub(crate) mod emailrep;
+pub(crate) mod filescan;
+pub(crate) mod fofa;
+pub(crate) mod fullhunt;
+pub(crate) mod github;
+pub(crate) mod gravatar;
+pub(crate) mod greynoise;
+pub(crate) mod hudsonrock;
+pub(crate) mod hunter;
+pub(crate) mod hybridanalysis;
+pub(crate) mod ikwyd;
 pub(crate) mod intelx;
-mod internetdb;
-mod ipdata;
-mod ipgeo;
-mod ipinfo;
-mod ipqs;
-mod leakix;
-mod local;
-mod malshare;
-mod maltiverse;
-mod malwarebazaar;
-mod maxmind;
-mod metadefender;
-mod netlas;
-mod onion;
-mod opentip;
-mod osv;
-mod otx;
-mod phone;
-mod poc;
-mod proxycheck;
-mod pulsedive;
-mod quake;
-mod rdap;
-mod rdap_domain;
-mod rdns;
-mod ripestat;
-mod safebrowsing;
-mod scamalytics;
-mod shodan;
-mod stopforumspam;
-mod threatfox;
-mod triage;
-mod url_analysis;
-mod urlhaus;
-mod urlscan;
-mod username;
-mod validin;
-mod virustotal;
-mod vpnapi;
-mod vulncheck;
-mod vulners;
-mod wayback;
-mod zoomeye;
+pub(crate) mod internetdb;
+pub(crate) mod ipdata;
+pub(crate) mod ipgeo;
+pub(crate) mod ipinfo;
+pub(crate) mod ipqs;
+pub(crate) mod leakix;
+pub(crate) mod local;
+pub(crate) mod malshare;
+pub(crate) mod maltiverse;
+pub(crate) mod malwarebazaar;
+pub(crate) mod maxmind;
+pub(crate) mod metadefender;
+pub(crate) mod netlas;
+pub(crate) mod onion;
+pub(crate) mod opentip;
+pub(crate) mod osv;
+pub(crate) mod otx;
+pub(crate) mod phone;
+pub(crate) mod poc;
+pub(crate) mod proxycheck;
+pub(crate) mod pulsedive;
+pub(crate) mod quake;
+pub(crate) mod rdap;
+pub(crate) mod rdap_domain;
+pub(crate) mod rdns;
+pub(crate) mod ripestat;
+pub(crate) mod safebrowsing;
+pub(crate) mod scamalytics;
+pub(crate) mod shodan;
+pub(crate) mod stopforumspam;
+pub(crate) mod threatfox;
+pub(crate) mod triage;
+pub(crate) mod url_analysis;
+pub(crate) mod urlhaus;
+pub(crate) mod urlscan;
+pub(crate) mod username;
+pub(crate) mod validin;
+pub(crate) mod virustotal;
+pub(crate) mod vpnapi;
+pub(crate) mod vulncheck;
+pub(crate) mod vulners;
+pub(crate) mod wayback;
+pub(crate) mod zoomeye;
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::net::IpAddr;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -89,30 +88,7 @@ use crate::verdict::Verdict;
 /// Un enricher payant, boxé pour cohabiter avec d'autres dans un `Vec` et
 /// tourner en parallèle (`join_all`). Ne peut pas être `JoinSet`/spawn : les
 /// futures empruntent `ctx` (pas `'static`). `+ Send` : `run()` les tient à
-/// travers un `await`, et axum exige des handlers `Send`.
-type BoxedEnricher<'a> = Pin<Box<dyn Future<Output = Enrichment> + Send + 'a>>;
-
-/// Ajoute un enricher payant au fan-out parallèle si sa clé API est présente.
-/// (`$ctx` passé explicitement car un `macro_rules!` n'est pas hygiénique pour
-/// les identifiants de valeur.)
-macro_rules! gated {
-    ($futs:ident, $ctx:ident, $key:literal, $cachekey:expr, $ttl:expr, $call:expr) => {
-        if $ctx.key($key).is_some() {
-            $futs.push(Box::pin($ctx.cache.get_or($cachekey, $ttl, $call)) as BoxedEnricher);
-        }
-    };
-}
-
-/// Variante pour les enrichers dont l'API est **IPv4-only** (GreyNoise
-/// community, CriminalIP, Kaspersky OpenTIP, Netlas — doc confirmée) : sur une
-/// IPv6 on skippe l'appel au lieu de récolter un 400 garanti.
-macro_rules! gated_v4 {
-    ($futs:ident, $ctx:ident, $ip:ident, $key:literal, $cachekey:expr, $ttl:expr, $call:expr) => {
-        if $ctx.key($key).is_some() && $ip.is_ipv4() {
-            $futs.push(Box::pin($ctx.cache.get_or($cachekey, $ttl, $call)) as BoxedEnricher);
-        }
-    };
-}
+pub(crate) type BoxedEnricher<'a> = Pin<Box<dyn Future<Output = Enrichment> + Send + 'a>>;
 
 /// Plafond d'entrées du cache (borne mémoire).
 const CACHE_MAX: usize = 50_000;
@@ -390,6 +366,8 @@ pub struct Ctx {
     pub rate_limiter: crate::rate::RateLimiter,
     /// Mapping CWE→MITRE ATT&CK (offline).
     pub attack_map: crate::attack::AttackMap,
+    /// Registre des enrichers (construit au démarrage, jamais muté après).
+    pub registry: Arc<Registry>,
 }
 
 impl Ctx {
@@ -400,8 +378,10 @@ impl Ctx {
 
     /// Vrai si au moins une clé d'enricher payant est configurée.
     pub fn has_paid_key(&self) -> bool {
-        let keys = self.keys.read().unwrap();
-        PAID_IP_KEYS.iter().any(|k| keys.contains_key(*k))
+        self.registry.entries.iter().any(|e| {
+            e.key_name()
+                .is_some_and(|k| k != "__gated__" && self.key(k).is_some())
+        })
     }
 }
 
@@ -463,6 +443,115 @@ impl Enrichment {
     }
 }
 
+// ── Enricher trait + Registry ───────────────────────────────────────────
+
+/// Trait qu'un enricher doit implémenter. Chaque module d'enricher expose
+/// une fonction libre ; le registre (`registry.rs`) l'enveloppe dans un
+/// adaptateur généré par la macro `enricher!`. Ajouter un enricher = une
+/// ligne dans `registry.rs` ; aucun changement dans le dispatch.
+pub trait Enricher: Send + Sync {
+    /// Identifiant unique de la source (ex. "abuseipdb").
+    fn name(&self) -> &'static str;
+    /// Clé API associée (env var). `None` = enricher gratuit (keyless).
+    fn key_name(&self) -> Option<&'static str>;
+    /// Types d'observables que cet enricher sait traiter.
+    fn applicable(&self, obs: &Observable) -> bool;
+    /// TTL du cache positif pour cette source.
+    fn ttl(&self) -> Duration;
+    /// IPv4-only ? (GreyNoise community, CriminalIP, OpenTIP, Netlas).
+    fn ipv4_only(&self) -> bool {
+        false
+    }
+    /// Lancer l'enrichissement. Reçoit l'observable complet ; l'adaptateur
+    /// extrait le champ nécessaire et appelle la fonction d'origine.
+    fn enrich<'a>(&'a self, obs: &'a Observable, ctx: &'a Ctx) -> BoxedEnricher<'a>;
+    /// Clé de cache construite à partir du nom de source et de l'observable.
+    fn cache_key(&self, obs: &Observable) -> String {
+        format!("{}:{}", self.name(), obs.value())
+    }
+}
+
+/// Registre des enrichers, construit au démarrage et partagé via `Ctx`.
+#[derive(Default)]
+pub struct Registry {
+    entries: Vec<Arc<dyn Enricher>>,
+}
+
+impl Registry {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register(&mut self, e: Arc<dyn Enricher>) {
+        self.entries.push(e);
+    }
+
+    /// Tous les enrichers applicables à un observable (clonés pour être déplacés
+    /// dans les futures parallèles).
+    pub fn for_obs(&self, obs: &Observable) -> Vec<Arc<dyn Enricher>> {
+        self.entries
+            .iter()
+            .filter(|e| e.applicable(obs))
+            .cloned()
+            .collect()
+    }
+
+    /// Vrai si au moins un enricher applicable a sa clé configurée.
+    pub fn has_keyed_for(&self, obs: &Observable, ctx: &Ctx) -> bool {
+        self.entries
+            .iter()
+            .any(|e| e.applicable(obs) && e.key_name().is_some_and(|k| ctx.key(k).is_some()))
+    }
+}
+
+/// Macro déclarative : génère un struct adaptateur + `impl Enricher` qui
+/// appelle la fonction d'enrichissement existante. L'adaptateur extrait le
+/// champ de l'`Observable` via le pattern et délègue à la closure fournie.
+///
+/// Usage :
+/// ```ignore
+/// enricher!(reg, AbuseIpDb, "abuseipdb", Some("ABUSEIPDB_API_KEY"),
+///     Observable::Ip(_), TTL_THREAT, false,
+///     |obs, ctx| match obs {
+///         Observable::Ip(ip) => abuseipdb::enrich_ip(*ip, ctx),
+///         _ => unreachable!(),
+///     }
+/// );
+/// ```
+macro_rules! enricher {
+    ($reg:expr, $name:ident, $source:literal, $key:expr, $obs_pat:pat, $ttl:expr, $ipv4:expr, $body:expr) => {{
+        #[allow(non_camel_case_types)]
+        struct $name;
+        impl $crate::enrich::Enricher for $name {
+            fn name(&self) -> &'static str {
+                $source
+            }
+            fn key_name(&self) -> Option<&'static str> {
+                $key
+            }
+            fn applicable(&self, obs: &$crate::observable::Observable) -> bool {
+                matches!(obs, $obs_pat)
+            }
+            fn ttl(&self) -> std::time::Duration {
+                $ttl
+            }
+            fn ipv4_only(&self) -> bool {
+                $ipv4
+            }
+            fn enrich<'a>(
+                &'a self,
+                obs: &'a $crate::observable::Observable,
+                ctx: &'a $crate::enrich::Ctx,
+            ) -> $crate::enrich::BoxedEnricher<'a> {
+                let obs = obs.clone();
+                Box::pin($body(obs, ctx))
+            }
+        }
+        $reg.register(std::sync::Arc::new($name));
+    }};
+}
+pub(crate) use enricher;
+
 /// Rapport unifié pour un observable.
 #[derive(Debug, Clone, Serialize)]
 pub struct Report {
@@ -491,6 +580,7 @@ pub struct Report {
 /// (agrège les signaux de menace avec un prior de popularité pour éviter les
 /// faux positifs sur les plateformes légitimes qui hébergent du malware).
 /// `authorized` conditionne les enrichers payants (protection des clés).
+#[tracing::instrument(skip(ctx), fields(query = %query, kind = %obs.kind()))]
 pub async fn run(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) -> Report {
     let mut report = dispatch(query, obs, ctx, authorized).await;
     // Le domaine (ou l'apex d'une URL/email) est-il de confiance ? Liste curée +
@@ -540,51 +630,15 @@ fn observable_apex(obs: &Observable) -> Option<String> {
 }
 
 /// Dispatch d'enrichissement par type d'observable (sans verdict — posé par `run`).
+/// Nouveau dispatch — utilise le registre pour sélectionner les enrichers.
+/// La logique métier spécifique à chaque type (IpReport, pivots) reste ici ;
+/// le choix des enrichers est délégué au registre.
+#[tracing::instrument(skip(ctx), fields(query = %query, kind = %obs.kind()))]
 async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) -> Report {
     match obs {
         Observable::Ip(ip) => {
-            // Fan-out gratuit : datasets locaux + rDNS + RDAP en parallèle.
-            let (ip_report, rdns, rdap, geo, dshield, sfs, idb) = tokio::join!(
-                local::enrich_ip(*ip, ctx),
-                ctx.cache
-                    .get_or(format!("rdns:{ip}"), TTL_RDNS, rdns::enrich_ip(*ip, ctx)),
-                ctx.cache
-                    .get_or(format!("rdap:{ip}"), TTL_RDAP, rdap::enrich_ip(*ip, ctx)),
-                ctx.cache
-                    .get_or(format!("geo:{ip}"), TTL_GEO, ipgeo::enrich_ip(*ip, ctx)),
-                ctx.cache.get_or(
-                    format!("dshield:{ip}"),
-                    TTL_THREAT,
-                    dshield::enrich_ip(*ip, ctx)
-                ),
-                ctx.cache.get_or(
-                    format!("sfs:{ip}"),
-                    TTL_THREAT,
-                    stopforumspam::enrich_ip(*ip, ctx)
-                ),
-                ctx.cache.get_or(
-                    format!("idb:{ip}"),
-                    TTL_THREAT,
-                    internetdb::enrich_ip(*ip, ctx)
-                ),
-            );
-            let mut enrichments = vec![rdns, rdap, geo, dshield, sfs, idb];
-            // Géo offline précise (MaxMind GeoLite2, si base présente).
-            enrichments.push(maxmind::enrich_ip(*ip, ctx).await);
-
-            // Enrichers payants : uniquement si la requête est autorisée.
-            if authorized {
-                enrichments.append(&mut paid_ip_enrichers(*ip, ctx).await);
-            } else if has_paid_ip_key(ctx) {
-                enrichments.push(Enrichment::ok(
-                    "gated",
-                    vec![Fact::new(
-                        "info",
-                        "des enrichers à clé nécessitent un token",
-                    )],
-                ));
-            }
-
+            let ip_report = local::enrich_ip(*ip, ctx).await;
+            let enrichments = run_enrichers(obs, ctx, authorized).await;
             let pivots = enrichments.iter().flat_map(|e| e.pivots.clone()).collect();
             Report {
                 query: query.into(),
@@ -598,147 +652,9 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
             }
         }
         Observable::Domain(d) => {
-            let (dns, rdap_d, crt, wb, hr, hz) = tokio::join!(
-                ctx.cache
-                    .get_or(format!("dns:{d}"), TTL_DNS, dns::enrich_domain(d, ctx)),
-                ctx.cache.get_or(
-                    format!("rdap_domain:{d}"),
-                    TTL_RDAP,
-                    rdap_domain::enrich_domain(d, ctx)
-                ),
-                ctx.cache
-                    .get_or(format!("crtsh:{d}"), TTL_RDAP, crtsh::enrich_domain(d, ctx)),
-                ctx.cache.get_or(
-                    format!("wayback:{d}"),
-                    TTL_RDAP,
-                    wayback::enrich_domain(d, ctx)
-                ),
-                ctx.cache.get_or(
-                    format!("hudsonrock:{d}"),
-                    TTL_THREAT,
-                    hudsonrock::enrich_domain(d, ctx)
-                ),
-                blocklists::enrich_domain(d, ctx),
-            );
-            let mut enrichments = vec![dns, rdap_d, crt, wb, hr, hz];
-            // Enrichers domaine payants : fan-out parallèle (au lieu d'une série
-            // de `.await`) si la requête est autorisée.
-            if authorized {
-                let mut futs: Vec<BoxedEnricher> = Vec::new();
-                gated!(
-                    futs,
-                    ctx,
-                    "VIRUSTOTAL_API_KEY",
-                    format!("vt_domain:{d}"),
-                    TTL_PAID,
-                    virustotal::enrich_domain(d, ctx)
-                );
-                if ctx.key("ABUSE_CH_API_KEY").is_some() {
-                    futs.push(Box::pin(ctx.cache.get_or(
-                        format!("tf_domain:{d}"),
-                        TTL_THREAT,
-                        threatfox::enrich_domain(d, ctx),
-                    )) as BoxedEnricher);
-                    futs.push(Box::pin(ctx.cache.get_or(
-                        format!("uh_host:{d}"),
-                        TTL_THREAT,
-                        urlhaus::enrich_host(d, ctx),
-                    )) as BoxedEnricher);
-                }
-                gated!(
-                    futs,
-                    ctx,
-                    "OTX_API_KEY",
-                    format!("otx_domain:{d}"),
-                    TTL_THREAT,
-                    otx::enrich_domain(d, ctx)
-                );
-                gated!(
-                    futs,
-                    ctx,
-                    "FULLHUNT_API_KEY",
-                    format!("fullhunt:{d}"),
-                    TTL_RDAP,
-                    fullhunt::enrich_domain(d, ctx)
-                );
-                gated!(
-                    futs,
-                    ctx,
-                    "GITHUB_TOKEN",
-                    format!("github:{d}"),
-                    TTL_RDAP,
-                    github::enrich_domain(d, ctx)
-                );
-                gated!(
-                    futs,
-                    ctx,
-                    "URLSCAN_API_KEY",
-                    format!("urlscan_domain:{d}"),
-                    TTL_RDAP,
-                    urlscan::enrich_domain(d, ctx)
-                );
-                gated!(
-                    futs,
-                    ctx,
-                    "INTELX_API_KEY",
-                    format!("intelx_domain:{d}"),
-                    TTL_RDAP,
-                    intelx::enrich_domain(d, ctx)
-                );
-                gated!(
-                    futs,
-                    ctx,
-                    "METADEFENDER_API_KEY",
-                    format!("mdc_domain:{d}"),
-                    TTL_THREAT,
-                    metadefender::enrich_domain(d, ctx)
-                );
-                gated!(
-                    futs,
-                    ctx,
-                    "GOOGLE_SAFEBROWSING_API_KEY",
-                    format!("gsb_domain:{d}"),
-                    TTL_THREAT,
-                    safebrowsing::enrich_domain(d, ctx)
-                );
-                gated!(
-                    futs,
-                    ctx,
-                    "CERTSPOTTER_API_KEY",
-                    format!("certspotter:{d}"),
-                    TTL_RDAP,
-                    certspotter::enrich_domain(d, ctx)
-                );
-                gated!(
-                    futs,
-                    ctx,
-                    "VALIDIN_API_KEY",
-                    format!("validin:{d}"),
-                    TTL_RDAP,
-                    validin::enrich_domain(d, ctx)
-                );
-                gated!(
-                    futs,
-                    ctx,
-                    "MALTIVERSE_API_KEY",
-                    format!("maltiverse:domain:{d}"),
-                    TTL_THREAT,
-                    maltiverse::enrich_domain(d, ctx)
-                );
-                gated!(
-                    futs,
-                    ctx,
-                    "PULSEDIVE_API_KEY",
-                    format!("pulsedive_d:{d}"),
-                    TTL_THREAT,
-                    pulsedive::enrich_domain(d, ctx)
-                );
-                enrichments.extend(futures::future::join_all(futs).await);
-            }
+            let enrichments = run_enrichers(obs, ctx, authorized).await;
             let mut pivots: Vec<Pivot> =
                 enrichments.iter().flat_map(|e| e.pivots.clone()).collect();
-            // Sous-domaine → pivot vers le domaine apex (eTLD+1), qui porte les
-            // données de registre (RDAP/crt.sh répondent sur l'apex, pas le sous-domaine).
             if let Some(apex) = crate::observable::registrable_domain(d)
                 && apex != *d
             {
@@ -759,455 +675,13 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                 freshness: None,
             }
         }
-        Observable::Cve(c) => {
-            let (cve_e, osv_e, cvedb_e) = tokio::join!(
-                ctx.cache
-                    .get_or(format!("cve:{c}"), TTL_CVE, cve::enrich_cve(c, ctx)),
-                ctx.cache
-                    .get_or(format!("osv:{c}"), TTL_CVE, osv::enrich_cve(c, ctx)),
-                ctx.cache
-                    .get_or(format!("cvedb:{c}"), TTL_CVE, cvedb::enrich_cve(c, ctx)),
-            );
-            let mut enrichments = vec![cve_e, osv_e, cvedb_e];
-            // PoC publics (offline, index tg12/PoC_CVEs dans le store).
-            enrichments.push(poc::enrich_cve(c, ctx));
-            if authorized && ctx.key("VULNCHECK_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("vulncheck:{c}"),
-                            TTL_CVE,
-                            vulncheck::enrich_cve(c, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("VULNERS_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(format!("vulners:{c}"), TTL_CVE, vulners::enrich_cve(c, ctx))
-                        .await,
-                );
-            }
-            Report {
-                query: query.into(),
-                verdict: None,
-                kind: obs.kind().into(),
-                ip: None,
-                enrichments,
-                pivots: vec![],
-                threat_actors: vec![],
-                freshness: None,
-            }
-        }
-        Observable::Hash(h) => {
-            let mut enrichments = vec![
-                ctx.cache
-                    .get_or(
-                        format!("hashlookup:{h}"),
-                        TTL_HASH,
-                        circl_hashlookup::enrich_hash(h, ctx),
-                    )
-                    .await,
-            ];
-            if authorized && ctx.key("VIRUSTOTAL_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("vt_hash:{h}"),
-                            TTL_PAID,
-                            virustotal::enrich_hash(h, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("ABUSE_CH_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("tf_hash:{h}"),
-                            TTL_THREAT,
-                            threatfox::enrich_hash(h, ctx),
-                        )
-                        .await,
-                );
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("uh_hash:{h}"),
-                            TTL_THREAT,
-                            urlhaus::enrich_hash(h, ctx),
-                        )
-                        .await,
-                );
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("mb_hash:{h}"),
-                            TTL_THREAT,
-                            malwarebazaar::enrich_hash(h, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("OTX_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("otx_hash:{h}"),
-                            TTL_THREAT,
-                            otx::enrich_hash(h, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("METADEFENDER_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("mdc_hash:{h}"),
-                            TTL_HASH,
-                            metadefender::enrich_hash(h, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("MALSHARE_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("malshare:{h}"),
-                            TTL_HASH,
-                            malshare::enrich_hash(h, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("FILESCAN_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("filescan:{h}"),
-                            TTL_HASH,
-                            filescan::enrich_hash(h, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("MALTIVERSE_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("maltiverse:hash:{h}"),
-                            TTL_HASH,
-                            maltiverse::enrich_hash(h, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("TRIAGE_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(format!("triage:{h}"), TTL_HASH, triage::enrich_hash(h, ctx))
-                        .await,
-                );
-            }
-            if authorized && ctx.key("HYBRIDANALYSIS_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("hybridanalysis:{h}"),
-                            TTL_HASH,
-                            hybridanalysis::enrich_hash(h, ctx),
-                        )
-                        .await,
-                );
-            }
-            Report {
-                query: query.into(),
-                verdict: None,
-                kind: obs.kind().into(),
-                ip: None,
-                enrichments,
-                pivots: vec![],
-                threat_actors: vec![],
-                freshness: None,
-            }
-        }
-        Observable::Email(e) => {
-            let (hr, sfs, grav) = tokio::join!(
-                ctx.cache.get_or(
-                    format!("hr_email:{e}"),
-                    TTL_THREAT,
-                    hudsonrock::enrich_email(e, ctx)
-                ),
-                ctx.cache.get_or(
-                    format!("sfs_email:{e}"),
-                    TTL_THREAT,
-                    stopforumspam::enrich_email(e, ctx)
-                ),
-                ctx.cache.get_or(
-                    format!("gravatar:{e}"),
-                    TTL_RDAP,
-                    gravatar::enrich_email(e, ctx)
-                ),
-            );
-            let mut enrichments = vec![hr, sfs, grav];
-            if authorized && ctx.key("INTELX_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("intelx_email:{e}"),
-                            TTL_RDAP,
-                            intelx::enrich_email(e, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("HUNTER_IO_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("hunter:{e}"),
-                            TTL_RDAP,
-                            hunter::enrich_email(e, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("EMAILREP_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("emailrep:{e}"),
-                            TTL_THREAT,
-                            emailrep::enrich_email(e, ctx),
-                        )
-                        .await,
-                );
-            }
-            let mut pivots = Vec::new();
-            if let Some(domain) = e.split('@').nth(1) {
-                pivots.push(Pivot {
-                    relation: "domain".into(),
-                    kind: "domain".into(),
-                    value: domain.to_string(),
-                });
-            }
-            Report {
-                query: query.into(),
-                verdict: None,
-                kind: obs.kind().into(),
-                ip: None,
-                enrichments,
-                pivots,
-                threat_actors: vec![],
-                freshness: None,
-            }
-        }
-        Observable::Url(u) => {
-            // Analyse du contenu de l'URL (HEAD + titre) — keyless, best-effort.
-            let url_analysis = ctx.cache
-                .get_or(
-                    format!("url_analysis:{u}"),
-                    TTL_THREAT,
-                    url_analysis::enrich_url(u, ctx),
-                )
-                .await;
-            let mut enrichments = vec![
-                url_analysis,
-                ctx.cache
-                    .get_or(
-                        format!("wayback_url:{u}"),
-                        TTL_RDAP,
-                        wayback::enrich_domain(u, ctx),
-                    )
-                    .await,
-            ];
-            if authorized && ctx.key("VIRUSTOTAL_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("vt_url:{u}"),
-                            TTL_PAID,
-                            virustotal::enrich_url(u, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("ABUSE_CH_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("tf_url:{u}"),
-                            TTL_THREAT,
-                            threatfox::enrich_url(u, ctx),
-                        )
-                        .await,
-                );
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("uh_url:{u}"),
-                            TTL_THREAT,
-                            urlhaus::enrich_url(u, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("OTX_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(format!("otx_url:{u}"), TTL_THREAT, otx::enrich_url(u, ctx))
-                        .await,
-                );
-            }
-            if authorized && ctx.key("URLSCAN_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("urlscan_url:{u}"),
-                            TTL_RDAP,
-                            urlscan::enrich_url(u, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("METADEFENDER_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("mdc_url:{u}"),
-                            TTL_THREAT,
-                            metadefender::enrich_url(u, ctx),
-                        )
-                        .await,
-                );
-            }
-            if authorized && ctx.key("GOOGLE_SAFEBROWSING_API_KEY").is_some() {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("gsb_url:{u}"),
-                            TTL_THREAT,
-                            safebrowsing::enrich_url(u, ctx),
-                        )
-                        .await,
-                );
-            }
-            let mut pivots = Vec::new();
-            if let Some(host) = url_host(u) {
-                pivots.push(Pivot {
-                    relation: "host".into(),
-                    kind: "domain".into(),
-                    value: host,
-                });
-            }
-            Report {
-                query: query.into(),
-                verdict: None,
-                kind: obs.kind().into(),
-                ip: None,
-                enrichments,
-                pivots,
-                threat_actors: vec![],
-                freshness: None,
-            }
-        }
-        Observable::Asn(n) => {
-            let e = ctx
-                .cache
-                .get_or(
-                    format!("ripestat:{n}"),
-                    TTL_RDAP,
-                    ripestat::enrich_asn(*n, ctx),
-                )
-                .await;
-            let pivots = e.pivots.clone();
-            Report {
-                query: query.into(),
-                verdict: None,
-                kind: obs.kind().into(),
-                ip: None,
-                enrichments: vec![e],
-                pivots,
-                threat_actors: vec![],
-                freshness: None,
-            }
-        }
-        Observable::Crypto(addr) => {
-            let mut enrichments = vec![crypto::ofac(addr, ctx).await];
-            // Etherscan (ETH uniquement, gated) — cache par adresse.
-            if crypto::chain(addr) == "eth" && authorized && ctx.key("ETHERSCAN_API_KEY").is_some()
-            {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("etherscan:{addr}"),
-                            TTL_THREAT,
-                            crypto::etherscan(addr, ctx),
-                        )
-                        .await,
-                );
-            }
-            let pivots = enrichments.iter().flat_map(|e| e.pivots.clone()).collect();
-            Report {
-                query: query.into(),
-                verdict: None,
-                kind: obs.kind().into(),
-                ip: None,
-                enrichments,
-                pivots,
-                threat_actors: vec![],
-                freshness: None,
-            }
-        }
-        Observable::Username(u) => {
-            // Recherche multi-sites (12 requêtes sortantes) : gated pour éviter
-            // qu'indic serve de proxy d'énumération public.
-            let mut enrichments = Vec::new();
-            if authorized {
-                enrichments.push(
-                    ctx.cache
-                        .get_or(
-                            format!("username:{u}"),
-                            TTL_RDAP,
-                            username::enrich_username(u, ctx),
-                        )
-                        .await,
-                );
-            } else {
-                enrichments.push(Enrichment::ok(
-                    "gated",
-                    vec![Fact::new("info", "recherche username nécessite un token")],
-                ));
-            }
-            Report {
-                query: query.into(),
-                verdict: None,
-                kind: obs.kind().into(),
-                ip: None,
-                enrichments,
-                pivots: vec![],
-                threat_actors: vec![],
-                freshness: None,
-            }
-        }
         Observable::Cidr(cidr) => {
-            // Enrichit la plage via son adresse réseau : résumé offline
-            // (ASN/org/géo/menace) + RDAP. Pas d'enrichers per-IP payants (plage).
             let Ok(net) = cidr.parse::<ipnet::IpNet>() else {
                 return stub(query, obs);
             };
             let net_ip = net.network();
-            let (ip_report, rdap) = tokio::join!(
-                local::enrich_ip(net_ip, ctx),
-                ctx.cache.get_or(
-                    format!("rdap:{net_ip}"),
-                    TTL_RDAP,
-                    rdap::enrich_ip(net_ip, ctx)
-                ),
-            );
+            let ip_report = local::enrich_ip(net_ip, ctx).await;
+            let enrichments = run_enrichers(obs, ctx, authorized).await;
             let range = Enrichment::ok(
                 "cidr",
                 vec![
@@ -1216,60 +690,92 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
                     Fact::new("adresses", host_count(&net)),
                 ],
             );
-            let enrichments = vec![range, rdap];
-            let pivots = enrichments.iter().flat_map(|e| e.pivots.clone()).collect();
+            let mut all = vec![range];
+            all.extend(enrichments);
+            let pivots = all.iter().flat_map(|e| e.pivots.clone()).collect();
             Report {
                 query: query.into(),
                 verdict: None,
                 kind: obs.kind().into(),
                 ip: Some(ip_report),
+                enrichments: all,
+                pivots,
+                threat_actors: vec![],
+                freshness: None,
+            }
+        }
+        // Types sans logique de pivot spécifique : juste les enrichers du registre.
+        _ => {
+            let enrichments = run_enrichers(obs, ctx, authorized).await;
+            let pivots = enrichments.iter().flat_map(|e| e.pivots.clone()).collect();
+            Report {
+                query: query.into(),
+                verdict: None,
+                kind: obs.kind().into(),
+                ip: None,
                 enrichments,
                 pivots,
                 threat_actors: vec![],
                 freshness: None,
             }
         }
-        Observable::Phone(p) => {
-            let e = phone::enrich_phone(p, ctx).await;
-            Report {
-                query: query.into(),
-                verdict: None,
-                kind: obs.kind().into(),
-                ip: None,
-                enrichments: vec![e],
-                pivots: vec![],
-                threat_actors: vec![],
-                freshness: None,
-            }
-        }
-        Observable::Onion(o) => {
-            let e = onion::enrich_onion(o, ctx).await;
-            Report {
-                query: query.into(),
-                verdict: None,
-                kind: obs.kind().into(),
-                ip: None,
-                enrichments: vec![e],
-                pivots: vec![],
-                threat_actors: vec![],
-                freshness: None,
-            }
-        }
-        Observable::Package(p) => {
-            let e = osv::enrich_package(p, ctx).await;
-            let pivots = e.pivots.clone();
-            Report {
-                query: query.into(),
-                verdict: None,
-                kind: obs.kind().into(),
-                ip: None,
-                enrichments: vec![e],
-                pivots,
-                threat_actors: vec![],
-                freshness: None,
-            }
-        }
     }
+}
+
+/// Exécute tous les enrichers applicables à un observable.
+/// - Keyless : toujours exécutés.
+/// - Keyed : exécutés seulement si `authorized` ET la clé est présente.
+/// - IPv4-only : ignorés sur IPv6.
+async fn run_enrichers(obs: &Observable, ctx: &Ctx, authorized: bool) -> Vec<Enrichment> {
+    let candidates = ctx.registry.for_obs(obs);
+    let (keyless, keyed): (Vec<_>, Vec<_>) =
+        candidates.into_iter().partition(|e| e.key_name().is_none());
+
+    let mut futs: Vec<BoxedEnricher<'_>> = Vec::new();
+
+    for e in keyless {
+        let key = e.cache_key(obs);
+        let ttl = e.ttl();
+        futs.push(Box::pin(async move {
+            ctx.cache.get_or(key, ttl, e.enrich(obs, ctx)).await
+        }));
+    }
+
+    if authorized {
+        for e in keyed {
+            let kn = e.key_name().unwrap_or("");
+            // Sentinelle "__gated__" = enricher sans clé mais gated (ex. username).
+            let can_run = if kn == "__gated__" {
+                true
+            } else {
+                ctx.key(kn).is_some()
+            };
+            if !can_run {
+                continue;
+            }
+            if e.ipv4_only()
+                && let Observable::Ip(ip) = obs
+                && !ip.is_ipv4()
+            {
+                continue;
+            }
+            let key = e.cache_key(obs);
+            let ttl = e.ttl();
+            futs.push(Box::pin(async move {
+                ctx.cache.get_or(key, ttl, e.enrich(obs, ctx)).await
+            }));
+        }
+    } else if !keyed.is_empty() && ctx.registry.has_keyed_for(obs, ctx) {
+        return vec![Enrichment::ok(
+            "gated",
+            vec![Fact::new(
+                "info",
+                "des enrichers à clé nécessitent un token",
+            )],
+        )];
+    }
+
+    futures::future::join_all(futs).await
 }
 
 /// Retire un secret (clé API) d'un message d'erreur avant de l'exposer : les clés
@@ -1302,270 +808,6 @@ fn url_host(url: &str) -> Option<String> {
     let after = url.split("://").nth(1)?;
     let host = after.split(['/', '?', '#', ':']).next()?;
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
-}
-
-// TTL par source.
-const TTL_RDNS: Duration = Duration::from_secs(3_600);
-const TTL_RDAP: Duration = Duration::from_secs(86_400);
-const TTL_SHODAN: Duration = Duration::from_secs(21_600);
-const TTL_GREYNOISE: Duration = Duration::from_secs(3_600);
-const TTL_DNS: Duration = Duration::from_secs(3_600);
-const TTL_GEO: Duration = Duration::from_secs(86_400);
-const TTL_CVE: Duration = Duration::from_secs(86_400);
-const TTL_THREAT: Duration = Duration::from_secs(3_600);
-const TTL_HASH: Duration = Duration::from_secs(86_400);
-const TTL_PAID: Duration = Duration::from_secs(21_600);
-const TTL_CENSYS: Duration = Duration::from_secs(604_800); // 7 j — quota Censys free 100/mois
-
-/// Enrichers IP à clé (payants), séquentiels (cache dès le 1er appel).
-/// Étendu au fil des ajouts (VirusTotal, AbuseIPDB, IPinfo, IPQS, CriminalIP, Censys…).
-async fn paid_ip_enrichers(ip: IpAddr, ctx: &Ctx) -> Vec<Enrichment> {
-    // Fan-out parallèle : tous les enrichers payants dont la clé est présente
-    // partent en même temps (bornés par les sémaphores dans `get_or`) au lieu
-    // de s'exécuter en série. `join_all` préserve l'ordre d'insertion.
-    let ip_str = ip.to_string();
-    let mut futs: Vec<BoxedEnricher> = Vec::new();
-    gated!(
-        futs,
-        ctx,
-        "SHODAN_API_KEY",
-        format!("shodan:{ip}"),
-        TTL_SHODAN,
-        shodan::enrich_ip(ip, ctx)
-    );
-    gated_v4!(
-        futs,
-        ctx,
-        ip,
-        "GREYNOISE_API_KEY",
-        format!("greynoise:{ip}"),
-        TTL_GREYNOISE,
-        greynoise::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "VIRUSTOTAL_API_KEY",
-        format!("vt_ip:{ip}"),
-        TTL_PAID,
-        virustotal::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "ABUSEIPDB_API_KEY",
-        format!("abuseipdb:{ip}"),
-        TTL_THREAT,
-        abuseipdb::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "IPINFO_TOKEN",
-        format!("ipinfo:{ip}"),
-        TTL_GEO,
-        ipinfo::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "IPQUALITYSCORE_API_KEY",
-        format!("ipqs:{ip}"),
-        TTL_PAID,
-        ipqs::enrich_ip(ip, ctx)
-    );
-    gated_v4!(
-        futs,
-        ctx,
-        ip,
-        "CRIMINALIP_API_KEY",
-        format!("criminalip:{ip}"),
-        TTL_PAID,
-        criminalip::enrich_ip(ip, ctx)
-    );
-    if ctx.key("ABUSE_CH_API_KEY").is_some() {
-        futs.push(Box::pin(ctx.cache.get_or(
-            format!("tf_ip:{ip}"),
-            TTL_THREAT,
-            threatfox::enrich_ip(ip, ctx),
-        )) as BoxedEnricher);
-        futs.push(Box::pin(ctx.cache.get_or(
-            format!("uh_host:{ip}"),
-            TTL_THREAT,
-            urlhaus::enrich_host(&ip_str, ctx),
-        )) as BoxedEnricher);
-    }
-    if ctx.key("SCAMALYTICS_API_KEY").is_some() && ctx.key("SCAMALYTICS_API_USER").is_some() {
-        futs.push(Box::pin(ctx.cache.get_or(
-            format!("scamalytics:{ip}"),
-            TTL_PAID,
-            scamalytics::enrich_ip(ip, ctx),
-        )) as BoxedEnricher);
-    }
-    gated!(
-        futs,
-        ctx,
-        "IPDATA_API_KEY",
-        format!("ipdata:{ip}"),
-        TTL_GEO,
-        ipdata::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "PROXYCHECK_API_KEY",
-        format!("proxycheck:{ip}"),
-        TTL_GEO,
-        proxycheck::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "VPNAPI_KEY",
-        format!("vpnapi:{ip}"),
-        TTL_GEO,
-        vpnapi::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "OTX_API_KEY",
-        format!("otx:{ip}"),
-        TTL_THREAT,
-        otx::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "CENSYS_API_KEY",
-        format!("censys:{ip}"),
-        TTL_CENSYS,
-        censys::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "LEAKIX_API_KEY",
-        format!("leakix:{ip}"),
-        TTL_THREAT,
-        leakix::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "URLSCAN_API_KEY",
-        format!("urlscan_ip:{ip}"),
-        TTL_RDAP,
-        urlscan::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "METADEFENDER_API_KEY",
-        format!("mdc_ip:{ip}"),
-        TTL_THREAT,
-        metadefender::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "IKNOWWHATYOUDOWNLOAD_API_KEY",
-        format!("ikwyd:{ip}"),
-        TTL_RDAP,
-        ikwyd::enrich_ip(ip, ctx)
-    );
-    gated_v4!(
-        futs,
-        ctx,
-        ip,
-        "NETLAS_API_KEY",
-        format!("netlas:{ip}"),
-        TTL_PAID,
-        netlas::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "FOFA_KEY",
-        format!("fofa:{ip}"),
-        TTL_PAID,
-        fofa::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "ZOOMEYE_API_KEY",
-        format!("zoomeye:{ip}"),
-        TTL_PAID,
-        zoomeye::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "QUAKE_API_KEY",
-        format!("quake:{ip}"),
-        TTL_PAID,
-        quake::enrich_ip(ip, ctx)
-    );
-    gated_v4!(
-        futs,
-        ctx,
-        ip,
-        "KASPERSKY_OPENTIP_KEY",
-        format!("opentip:{ip}"),
-        TTL_THREAT,
-        opentip::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "MALTIVERSE_API_KEY",
-        format!("maltiverse:ip:{ip}"),
-        TTL_THREAT,
-        maltiverse::enrich_ip(ip, ctx)
-    );
-    gated!(
-        futs,
-        ctx,
-        "PULSEDIVE_API_KEY",
-        format!("pulsedive:{ip}"),
-        TTL_THREAT,
-        pulsedive::enrich_ip(ip, ctx)
-    );
-    futures::future::join_all(futs).await
-}
-
-/// Noms d'env des enrichers IP à clé (pour le badge "gated").
-const PAID_IP_KEYS: &[&str] = &[
-    "SHODAN_API_KEY",
-    "GREYNOISE_API_KEY",
-    "VIRUSTOTAL_API_KEY",
-    "ABUSEIPDB_API_KEY",
-    "IPINFO_TOKEN",
-    "IPQUALITYSCORE_API_KEY",
-    "CRIMINALIP_API_KEY",
-    "ABUSE_CH_API_KEY",
-    "SCAMALYTICS_API_KEY",
-    "IPDATA_API_KEY",
-    "PROXYCHECK_API_KEY",
-    "VPNAPI_KEY",
-    "OTX_API_KEY",
-    "CENSYS_API_KEY",
-    "LEAKIX_API_KEY",
-    "URLSCAN_API_KEY",
-    "METADEFENDER_API_KEY",
-    "IKNOWWHATYOUDOWNLOAD_API_KEY",
-    "NETLAS_API_KEY",
-    "FOFA_KEY",
-    "ZOOMEYE_API_KEY",
-    "QUAKE_API_KEY",
-    "KASPERSKY_OPENTIP_KEY",
-    "MALTIVERSE_API_KEY",
-    "PULSEDIVE_API_KEY",
-];
-
-fn has_paid_ip_key(ctx: &Ctx) -> bool {
-    PAID_IP_KEYS.iter().any(|k| ctx.key(k).is_some())
 }
 
 /// Nombre d'adresses d'un préfixe, sous forme lisible (`2^n` au-delà de 2^64).

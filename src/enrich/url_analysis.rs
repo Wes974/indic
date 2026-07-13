@@ -22,9 +22,10 @@ pub async fn enrich_url(url: &str, ctx: &Ctx) -> Enrichment {
 
             if status.is_redirection()
                 && let Some(location) = resp.headers().get("location")
-                    && let Ok(loc) = location.to_str() {
-                        facts.push(Fact::new("redirection", loc.to_string()));
-                    }
+                && let Ok(loc) = location.to_str()
+            {
+                facts.push(Fact::new("redirection", loc.to_string()));
+            }
             if status.is_server_error() {
                 signals.push(Signal::new("url_analysis", "info"));
                 facts.push(Fact::new("note", "serveur en erreur (5xx)"));
@@ -33,7 +34,11 @@ pub async fn enrich_url(url: &str, ctx: &Ctx) -> Enrichment {
                 facts.push(Fact::new("note", "page introuvable (404)"));
             }
 
-            if let Some(ct) = resp.headers().get("content-type").and_then(|v| v.to_str().ok()) {
+            if let Some(ct) = resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+            {
                 facts.push(Fact::new("content_type", ct.to_string()));
                 // Détecter les types suspects
                 if ct.contains("application/") && !ct.contains("json") && !ct.contains("xml") {
@@ -51,22 +56,20 @@ pub async fn enrich_url(url: &str, ctx: &Ctx) -> Enrichment {
                 .headers()
                 .get("content-length")
                 .and_then(|v| v.to_str().ok())
-                && let Ok(size) = cl.parse::<u64>() {
-                    let readable = if size > 1_000_000 {
-                        format!("{:.1} Mo", size as f64 / 1_000_000.0)
-                    } else if size > 1_000 {
-                        format!("{:.1} Ko", size as f64 / 1_000.0)
-                    } else {
-                        format!("{size} o")
-                    };
-                    facts.push(Fact::new("taille", readable));
-                }
+                && let Ok(size) = cl.parse::<u64>()
+            {
+                let readable = if size > 1_000_000 {
+                    format!("{:.1} Mo", size as f64 / 1_000_000.0)
+                } else if size > 1_000 {
+                    format!("{:.1} Ko", size as f64 / 1_000.0)
+                } else {
+                    format!("{size} o")
+                };
+                facts.push(Fact::new("taille", readable));
+            }
             // Cookies (indicateurs potentiels)
             if let Some(cookies) = resp.headers().get("set-cookie") {
-                let count = cookies
-                    .to_str()
-                    .map(|c| c.split(";").count())
-                    .unwrap_or(0);
+                let count = cookies.to_str().map(|c| c.split(";").count()).unwrap_or(0);
                 if count > 0 {
                     facts.push(Fact::new("cookies", format!("{count} défini(s)")));
                 }
@@ -88,7 +91,11 @@ pub async fn enrich_url(url: &str, ctx: &Ctx) -> Enrichment {
             let err = e.to_string();
             // Erreurs de connexion → signal
             if err.contains("timeout") || err.contains("connect") {
-                signals.push(Signal::with_detail("url_analysis", "info", "site injoignable"));
+                signals.push(Signal::with_detail(
+                    "url_analysis",
+                    "info",
+                    "site injoignable",
+                ));
                 facts.push(Fact::new("statut", "injoignable"));
             }
             return Enrichment {
@@ -121,7 +128,10 @@ pub async fn enrich_url(url: &str, ctx: &Ctx) -> Enrichment {
     }
 
     // Récupérer le titre de la page (GET partiel, limité à 64 Ko)
-    if facts.iter().any(|f| f.key == "http_status" && f.value != "404" && f.value != "503") {
+    if facts
+        .iter()
+        .any(|f| f.key == "http_status" && f.value != "404" && f.value != "503")
+    {
         // Récupérer le titre de la page (GET partiel, limité à 64 Ko) — best-effort.
         if let Ok(resp) = ctx
             .http
@@ -200,8 +210,14 @@ mod tests {
 
     #[test]
     fn url_host_extraction() {
-        assert_eq!(url_host("https://example.com/path"), Some("example.com".into()));
+        assert_eq!(
+            url_host("https://example.com/path"),
+            Some("example.com".into())
+        );
         assert_eq!(url_host("http://evil.com:8080/x"), Some("evil.com".into()));
-        assert_eq!(url_host("ftp://files.example.org"), Some("files.example.org".into()));
+        assert_eq!(
+            url_host("ftp://files.example.org"),
+            Some("files.example.org".into())
+        );
     }
 }

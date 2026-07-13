@@ -41,10 +41,7 @@ async fn module_ahmia(ctx: &Ctx, state: &mut State) -> Vec<Alert> {
     }
     let mut alerts = Vec::new();
     for kw in &keywords {
-        let url = format!(
-            "https://ahmia.fi/search/?q={}",
-            urlencoding(kw)
-        );
+        let url = format!("https://ahmia.fi/search/?q={}", urlencoding(kw));
         match ctx
             .http
             .get(&url)

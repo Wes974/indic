@@ -59,7 +59,11 @@ impl State {
 
     /// Renvoie les identifiants **neufs** (jamais vus) et les marque vus. Au
     /// premier passage d'un module, amorce en silence (renvoie vide).
-    pub(crate) fn fresh(&mut self, module: &str, ids: impl IntoIterator<Item = String>) -> Vec<String> {
+    pub(crate) fn fresh(
+        &mut self,
+        module: &str,
+        ids: impl IntoIterator<Item = String>,
+    ) -> Vec<String> {
         let first_run = !self.seeded.contains(module);
         let seen = self.seen.entry(module.to_string()).or_default();
         let mut out = Vec::new();
@@ -403,36 +407,36 @@ async fn module_watchlist(ctx: &Ctx, state: &mut State) -> Vec<Alert> {
         let url = format!("https://crt.sh/?q=%25.{domain}&output=json&exclude=expired");
         if let Ok(resp) = ctx.http.get(&url).send().await
             && let Ok(certs) = resp.json::<serde_json::Value>().await
-                && let Some(arr) = certs.as_array() {
-                    let fresh_ids: Vec<String> = arr
-                        .iter()
-                        .filter_map(|c| {
-                            let id = c
-                                .get("id")
-                                .and_then(|v| v.as_i64())
-                                .map(|n| n.to_string())?;
-                            let _not_before = c.get("not_before").and_then(|v| v.as_str())?;
-                            // Vérifier si le cert est récent (< 7 jours) — en pratique on dédup par id
-                            (!id.is_empty()).then_some(id)
-                        })
-                        .collect();
-                    let module = format!("watchlist:cert:{domain}");
-                    for id in state.fresh(&module, fresh_ids) {
-                        let cert_info = arr.iter().find(|c| {
-                            c.get("id").and_then(|v| v.as_i64()).map(|n| n.to_string())
-                                == Some(id.clone())
-                        });
-                        let name = cert_info
-                            .and_then(|c| c.get("name_value").and_then(|v| v.as_str()))
-                            .unwrap_or(&id);
-                        alerts.push(Alert {
-                            title: format!("Nouveau cert pour {domain}"),
-                            message: format!("Certificat : {name}"),
-                            priority: 0,
-                            url: Some(format!("https://crt.sh/?id={id}")),
-                        });
-                    }
-                }
+            && let Some(arr) = certs.as_array()
+        {
+            let fresh_ids: Vec<String> = arr
+                .iter()
+                .filter_map(|c| {
+                    let id = c
+                        .get("id")
+                        .and_then(|v| v.as_i64())
+                        .map(|n| n.to_string())?;
+                    let _not_before = c.get("not_before").and_then(|v| v.as_str())?;
+                    // Vérifier si le cert est récent (< 7 jours) — en pratique on dédup par id
+                    (!id.is_empty()).then_some(id)
+                })
+                .collect();
+            let module = format!("watchlist:cert:{domain}");
+            for id in state.fresh(&module, fresh_ids) {
+                let cert_info = arr.iter().find(|c| {
+                    c.get("id").and_then(|v| v.as_i64()).map(|n| n.to_string()) == Some(id.clone())
+                });
+                let name = cert_info
+                    .and_then(|c| c.get("name_value").and_then(|v| v.as_str()))
+                    .unwrap_or(&id);
+                alerts.push(Alert {
+                    title: format!("Nouveau cert pour {domain}"),
+                    message: format!("Certificat : {name}"),
+                    priority: 0,
+                    url: Some(format!("https://crt.sh/?id={id}")),
+                });
+            }
+        }
         // GitHub : recherche de mentions du domaine
         if let Some(gh_token) = ctx.key("GITHUB_TOKEN") {
             let gh_url = format!(
@@ -446,40 +450,39 @@ async fn module_watchlist(ctx: &Ctx, state: &mut State) -> Vec<Alert> {
                 .send()
                 .await
                 && let Ok(body) = resp.json::<serde_json::Value>().await
-                    && let Some(items) = body.get("items").and_then(|v| v.as_array()) {
-                        let gh_ids: Vec<String> = items
-                            .iter()
-                            .filter_map(|item| {
-                                item.get("sha").and_then(|v| v.as_str()).map(String::from)
-                            })
-                            .collect();
-                        let module = format!("watchlist:gh:{domain}");
-                        for id in state.fresh(&module, gh_ids) {
-                            if let Some(item) = items
-                                .iter()
-                                .find(|i| i.get("sha").and_then(|v| v.as_str()) == Some(&id))
-                            {
-                                let path = item
-                                    .get("path")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("inconnu");
-                                let repo = item
-                                    .get("repository")
-                                    .and_then(|r| r.get("full_name"))
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("inconnu");
-                                alerts.push(Alert {
-                                    title: format!("Mention GitHub de {domain}"),
-                                    message: format!("{repo} / {path}"),
-                                    priority: 0,
-                                    url: item
-                                        .get("html_url")
-                                        .and_then(|v| v.as_str())
-                                        .map(String::from),
-                                });
-                            }
-                        }
+                && let Some(items) = body.get("items").and_then(|v| v.as_array())
+            {
+                let gh_ids: Vec<String> = items
+                    .iter()
+                    .filter_map(|item| item.get("sha").and_then(|v| v.as_str()).map(String::from))
+                    .collect();
+                let module = format!("watchlist:gh:{domain}");
+                for id in state.fresh(&module, gh_ids) {
+                    if let Some(item) = items
+                        .iter()
+                        .find(|i| i.get("sha").and_then(|v| v.as_str()) == Some(&id))
+                    {
+                        let path = item
+                            .get("path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("inconnu");
+                        let repo = item
+                            .get("repository")
+                            .and_then(|r| r.get("full_name"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("inconnu");
+                        alerts.push(Alert {
+                            title: format!("Mention GitHub de {domain}"),
+                            message: format!("{repo} / {path}"),
+                            priority: 0,
+                            url: item
+                                .get("html_url")
+                                .and_then(|v| v.as_str())
+                                .map(String::from),
+                        });
                     }
+                }
+            }
         }
     }
     alerts

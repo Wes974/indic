@@ -2,6 +2,7 @@
 //! les lance en parallèle et fusionne en un rapport générique.
 
 pub(crate) mod abuseipdb;
+pub(crate) mod binaryedge;
 pub(crate) mod blocklists;
 pub(crate) mod censys;
 pub(crate) mod certspotter;

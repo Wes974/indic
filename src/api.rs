@@ -40,6 +40,12 @@ pub fn router(ctx: SharedCtx) -> Router {
         // Alias historiques (compat).
         .route("/v1/check", get(check_query))
         .route("/ip/{addr}", get(check_path))
+        .layer(
+            tower_http::cors::CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+                .allow_headers(tower_http::cors::Any),
+        )
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(axum::middleware::from_fn(security_headers))
         .layer(tower_http::limit::RequestBodyLimitLayer::new(1024 * 1024)) // 1 MiB

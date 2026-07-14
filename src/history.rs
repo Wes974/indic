@@ -10,6 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct History {
     conn: Mutex<Connection>,
+    retention_days: u32,
+    purge_counter: std::sync::atomic::AtomicU64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -25,8 +27,8 @@ pub struct HistoryEntry {
 }
 
 impl History {
-    /// Ouvre (ou crée) la base SQLite. Retourne `None` si le chemin est vide
-    /// ou si l'ouverture échoue.
+    /// Ouvre (ou crée) la base SQLite avec rétention configurable.
+    /// `INDIC_HISTORY_RETENTION_DAYS` (défaut 90j).
     pub fn open(path: &Path) -> Option<Self> {
         let conn = Connection::open(path).ok()?;
         conn.execute_batch(
@@ -45,8 +47,14 @@ impl History {
             CREATE INDEX IF NOT EXISTS idx_lookups_kind ON lookups(kind);",
         )
         .ok()?;
+        let retention = std::env::var("INDIC_HISTORY_RETENTION_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(90);
         Some(Self {
             conn: Mutex::new(conn),
+            retention_days: retention,
+            purge_counter: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -69,8 +77,16 @@ impl History {
             "INSERT INTO lookups (query, kind, verdict_label, verdict_score, source_count, signal_count, ts) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![query, kind, verdict_label, verdict_score, source_count, signal_count, now],
         );
+        drop(conn);
+        // Purge périodique : tous les 100 inserts, nettoie les entrées expirées.
+        let n = self
+            .purge_counter
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            + 1;
+        if n % 100 == 0 {
+            self.purge_older_than(self.retention_days);
+        }
     }
-
     /// Récupère les N derniers lookups.
     pub fn recent(&self, limit: u32) -> Vec<HistoryEntry> {
         let conn = self.conn.lock();

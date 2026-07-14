@@ -9,13 +9,13 @@ use crate::observable::Observable;
 use std::time::Duration;
 
 use crate::enrich::{
-    abuseipdb, blocklists, censys, certspotter, circl_hashlookup, criminalip, crtsh, crypto, cve,
-    cvedb, dns, dshield, emailrep, filescan, fofa, fullhunt, github, gravatar, greynoise,
-    hudsonrock, hunter, hybridanalysis, ikwyd, intelx, internetdb, ipdata, ipgeo, ipinfo, ipqs,
-    leakix, malshare, maltiverse, malwarebazaar, maxmind, metadefender, netlas, onion, opentip,
-    osv, otx, phone, poc, proxycheck, pulsedive, quake, rdap, rdap_domain, rdns, ripestat,
-    safebrowsing, scamalytics, shodan, stopforumspam, threatfox, triage, url_analysis, urlhaus,
-    urlscan, username, validin, virustotal, vpnapi, vulncheck, vulners, wayback, zoomeye,
+    abuseipdb, binaryedge, blocklists, censys, certspotter, circl_hashlookup, criminalip, crtsh,
+    crypto, cve, cvedb, dns, dshield, emailrep, filescan, fofa, fullhunt, github, gravatar,
+    greynoise, hudsonrock, hunter, hybridanalysis, ikwyd, intelx, internetdb, ipdata, ipgeo,
+    ipinfo, ipqs, leakix, malshare, maltiverse, malwarebazaar, maxmind, metadefender, netlas,
+    onion, opentip, osv, otx, phone, poc, proxycheck, pulsedive, quake, rdap, rdap_domain, rdns,
+    ripestat, safebrowsing, scamalytics, shodan, stopforumspam, threatfox, triage, url_analysis,
+    urlhaus, urlscan, username, validin, virustotal, vpnapi, vulncheck, vulners, wayback, zoomeye,
 };
 
 // ── TTL constants (mirrored from enrich.rs) ──────────────────────────────
@@ -208,6 +208,22 @@ pub fn build() -> Registry {
         |obs, ctx| async move {
             match obs {
                 Observable::Ip(ip) => abuseipdb::enrich_ip(ip, ctx).await,
+                _ => unreachable!(),
+            }
+        }
+    );
+
+    enricher!(
+        reg,
+        BinaryEdge,
+        "binaryedge",
+        Some("BINARYEDGE_API_KEY"),
+        Observable::Ip(_),
+        TTL_THREAT,
+        false,
+        |obs, ctx| async move {
+            match obs {
+                Observable::Ip(ip) => binaryedge::enrich_ip(ip, ctx).await,
                 _ => unreachable!(),
             }
         }

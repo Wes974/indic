@@ -104,6 +104,7 @@ pub const KNOWN_KEYS: &[&str] = &[
     // Veille : sink d'alertes Pushover.
     "PUSHOVER_TOKEN",
     "PUSHOVER_USER",
+    "BINARYEDGE_API_KEY",
 ];
 
 #[derive(Parser)]

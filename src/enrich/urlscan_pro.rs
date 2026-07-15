@@ -102,10 +102,11 @@ async fn fetch(
         }
 
         // Récupérer les URLs de screenshot
-        if let Some(screenshot) = res.get("screenshot").and_then(|x| x.as_str()) {
-            if !screenshot.is_empty() && facts.len() < 8 {
-                facts.push(Fact::new("screenshot", screenshot));
-            }
+        if let Some(screenshot) = res.get("screenshot").and_then(|x| x.as_str())
+            && !screenshot.is_empty()
+            && facts.len() < 8
+        {
+            facts.push(Fact::new("screenshot", screenshot));
         }
     }
 

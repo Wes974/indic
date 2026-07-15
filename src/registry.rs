@@ -15,7 +15,8 @@ use crate::enrich::{
     ipinfo, ipqs, leakix, malshare, maltiverse, malwarebazaar, maxmind, metadefender, netlas,
     onion, opentip, osv, otx, phone, poc, proxycheck, pulsedive, quake, rdap, rdap_domain, rdns,
     ripestat, safebrowsing, scamalytics, shodan, stopforumspam, threatfox, triage, url_analysis,
-    urlhaus, urlscan, username, validin, virustotal, vpnapi, vulncheck, vulners, wayback, zoomeye,
+    urlhaus, urlscan, urlscan_pro, username, validin, virustotal, vpnapi, vulncheck, vulners, wayback,
+    zoomeye,
 };
 
 // ── TTL constants (mirrored from enrich.rs) ──────────────────────────────
@@ -759,6 +760,22 @@ pub fn build() -> Registry {
         |obs, ctx| async move {
             match obs {
                 Observable::Domain(d) => urlscan::enrich_domain(&d, ctx).await,
+                _ => unreachable!(),
+            }
+        }
+    );
+
+    enricher!(
+        reg,
+        UrlScanProDomain,
+        "urlscan_pro",
+        Some("URLSCAN_PRO_API_KEY"),
+        Observable::Domain(_),
+        TTL_RDAP,
+        false,
+        |obs, ctx| async move {
+            match obs {
+                Observable::Domain(d) => urlscan_pro::enrich_domain(&d, ctx).await,
                 _ => unreachable!(),
             }
         }

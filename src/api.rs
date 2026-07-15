@@ -37,18 +37,32 @@ pub fn router(ctx: SharedCtx) -> Router {
         .route("/extract", post(extract_iocs))
         .route("/correlate", get(correlate_q))
         .route("/compare", post(compare))
+        // ── API v2 ────────────────────────────────────────────────────────
+        .route("/v2/lookup", get(lookup_q))
+        .route("/v2/lookup/bulk", post(lookup_bulk))
+        .route("/v2/lookup/export", get(lookup_export))
+        .route("/v2/compare", post(compare))
+        .route("/v2/correlate", get(correlate_q))
+        .route("/v2/extract", post(extract_iocs))
+        .route("/v2/push", post(push_obs))
+        .route("/v2/history", get(history_recent))
+        .route("/v2/dashboard", get(dashboard))
+        .route("/v2/metrics", get(metrics))
+        .route("/v2/settings", get(settings))
+        // ── Debug ──────────────────────────────────────────────────────────
+        .route("/chaos", get(chaos_test))
+        // ── Assets statiques ──────────────────────────────────────────────
+        .nest_service("/assets", tower_http::services::ServeDir::new("assets"))
         // Alias historiques (compat).
         .route("/v1/check", get(check_query))
         .route("/ip/{addr}", get(check_path))
-        .layer(
-            tower_http::cors::CorsLayer::new()
-                .allow_origin(tower_http::cors::Any)
-                .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
-                .allow_headers(tower_http::cors::Any),
-        )
+        .layer(tower_http::cors::CorsLayer::new()
+            .allow_origin(tower_http::cors::Any)
+            .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+            .allow_headers(tower_http::cors::Any))
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(axum::middleware::from_fn(security_headers))
-        .layer(tower_http::limit::RequestBodyLimitLayer::new(1024 * 1024)) // 1 MiB
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(1024 * 1024))
         .with_state(ctx)
 }
 
@@ -714,7 +728,6 @@ async fn compare(
     let auth = authorized(&ctx, &headers, body.token.as_deref());
     let (a, b) = tokio::join!(
         async {
-            match Observable::detect(&body.a) {
                 Some(o) => Some(enrich::run(&body.a, &o, &ctx, auth).await),
                 None => None,
             }
@@ -727,4 +740,24 @@ async fn compare(
         },
     );
     Json(json!({ "a": a, "b": b })).into_response()
+}
+
+/// `GET /chaos?delay=2000&error=502` — injecte un délai ou une erreur pour
+/// tester la robustesse du client et le graceful shutdown.
+/// Réservé au développement (pas de token requis).
+async fn chaos_test(Query(p): Query<ChaosQ>) -> Response {
+    if let Some(ms) = p.delay {
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+    }
+    if let Some(code) = p.error {
+        let status = StatusCode::from_u16(code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        return (status, Json(json!({ "error": format!("chaos: erreur injectée {code}") }))).into_response();
+    }
+    Json(json!({ "chaos": "ok", "delay_ms": p.delay, "error_code": p.error })).into_response()
+}
+
+#[derive(Deserialize)]
+struct ChaosQ {
+    delay: Option<u64>,
+    error: Option<u16>,
 }

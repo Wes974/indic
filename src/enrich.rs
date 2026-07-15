@@ -61,6 +61,7 @@ pub(crate) mod triage;
 pub(crate) mod url_analysis;
 pub(crate) mod urlhaus;
 pub(crate) mod urlscan;
+pub(crate) mod urlscan_pro;
 pub(crate) mod username;
 pub(crate) mod validin;
 pub(crate) mod virustotal;

@@ -204,7 +204,7 @@ mod tests {
             signals[0]
                 .detail
                 .as_ref()
-                .map_or(false, |d| d.contains("mirai") && d.contains("c2"))
+                .is_some_and(|d| d.contains("mirai") && d.contains("c2"))
         );
     }
 

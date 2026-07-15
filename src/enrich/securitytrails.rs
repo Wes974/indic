@@ -198,7 +198,7 @@ fn is_recent(date_str: &str, max_days: i64) -> bool {
     age >= 0 && age <= max_days
 }
 fn month_offset(m: u32, y: i64) -> i64 {
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let leap = y.is_multiple_of(4) && (y % 100 != 0 || y.is_multiple_of(400));
     let base = match m {
         1 => 0,
         2 => 31,

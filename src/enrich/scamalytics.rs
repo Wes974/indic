@@ -59,6 +59,7 @@ fn build(sc: Sc) -> Enrichment {
         facts.push(Fact::new("isp", isp));
     }
     let mut flags = Vec::new();
+        #[allow(clippy::collapsible_if)]
     if let Some(p) = &sc.scamalytics_proxy {
         if p.is_datacenter {
             flags.push("datacenter");

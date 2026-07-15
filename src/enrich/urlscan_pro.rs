@@ -232,10 +232,10 @@ mod tests {
 
         let mut malicious_count = 0u64;
         for res in results {
-            if let Some(vd) = res.get("verdicts").and_then(|x| x.get("overall")) {
-                if vd.get("malicious").and_then(|x| x.as_bool()) == Some(true) {
-                    malicious_count += 1;
-                }
+            if let Some(vd) = res.get("verdicts").and_then(|x| x.get("overall"))
+                && vd.get("malicious").and_then(|x| x.as_bool()) == Some(true)
+            {
+                malicious_count += 1;
             }
         }
         assert_eq!(malicious_count, 1);

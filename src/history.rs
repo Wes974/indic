@@ -83,7 +83,7 @@ impl History {
             .purge_counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             + 1;
-        if n % 100 == 0 {
+        if n.is_multiple_of(100) {
             self.purge_older_than(self.retention_days);
         }
     }

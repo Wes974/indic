@@ -10,6 +10,11 @@
 # Bases optionnelles
 *.mmdb
 
+# E2E (Playwright) — deps & artefacts de run locaux
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+
 # Notes internes / spécifiques à mon infra — hors dépôt public
 JOURNAL.md
 ROADMAP.md

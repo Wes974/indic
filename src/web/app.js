@@ -28,7 +28,6 @@ const token = () => LS.get("indic_token", "");
 
 /* ---------- thème ---------- */
 let GRAPH = null;   // instance du graphe de pivots (déclarée tôt : applyTheme la référence)
-const V_CACHE = new Map();   // cache verdict labels per value (évite refetcher le verdict)
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
   $("mTheme").content = t === "dark" ? "#0a0e13" : "#f3f5f8";
@@ -49,23 +48,13 @@ $("themeBtn").onclick = () => {
 
 /* ---------- sémantique couleurs ---------- */
 const SIG_HUE = {
-  // Critiques (rouge)
-  malicious: "red", c2: "red", botnet: "red", malware: "red", phishing: "red",
-  infostealer: "red", abuse: "red", spam: "red", attack: "red",
-  compromised: "red", bot: "red", sanctions: "red", exploit: "red",
-  // Suspects (orange/amber)
-  suspicious: "amber", threat: "amber", scanner: "amber", noise: "amber",
-  honeypot: "amber", bruteforce: "amber",
-  // Anonymat (orange)
+  malicious: "red", infostealer: "red", abuse: "red", spam: "red", attack: "red", compromised: "red", bot: "red",
   vpn: "orange", proxy: "orange", anonymous: "orange",
-  // Tor/relay (violet)
   tor: "purple", relay: "purple",
-  // Infra (bleu)
+  scanner: "amber", noise: "amber", honeypot: "amber", bruteforce: "amber",
   datacenter: "blue", hosting: "blue", cloud: "blue", cdn: "blue",
-  // Bénin (vert)
   residential: "green", benign: "green", clean: "green",
-  // Info / neutre
-  info: "slate", osint: "slate", infra: "slate",
+  infra: "slate",
 };
 const SEVERITY = { red: 0, orange: 1, purple: 2, amber: 3, blue: 4, magenta: 5, cyan: 6, green: 7, slate: 8 };
 const hueOf = (cat) => SIG_HUE[String(cat || "").toLowerCase()] || "slate";
@@ -371,18 +360,17 @@ function graphPalette() {
            card: v("--card"), card2: v("--card2"), accent: v("--accent") };
 }
 
-function renderGraph(query, centralKind, pivots, verdictLabel) {
+function renderGraph(query, centralKind, pivots) {
   GRAPH?.destroy();
   GRAPH = null;
   const card = $("graphCard");
   $("glegend").replaceChildren();
   if (pivots.length < 3) { card.hidden = true; return; }
   card.hidden = false;
-  GRAPH = createPivotGraph(card, $("glegend"), query, centralKind, pivots, verdictLabel);
+  GRAPH = createPivotGraph(card, $("glegend"), query, centralKind, pivots);
 }
 
-const VERDICT_HUE = { malicious: "red", suspect: "amber", clean: "green" };
-function createPivotGraph(card, leg, query, centralKind, initialPivots, centralVerdict) {
+function createPivotGraph(card, leg, query, centralKind, initialPivots) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const nodes = [];
@@ -425,7 +413,7 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
 
   function makeNode(value, kind, level, relation) {
     return { id: value, value, kind, level, relation: relation || "",
-             x: cx, y: cy, dx: 0, dy: 0, expanded: false, loading: false, central: false, verdict: null };
+             x: cx, y: cy, dx: 0, dy: 0, expanded: false, loading: false, central: false };
   }
   function addEdge(a, b) {
     if (a === b) return;
@@ -443,7 +431,6 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
         child.x = parent.x + (Math.random() - 0.5) * 60;
         child.y = parent.y + (Math.random() - 0.5) * 60;
         nodes.push(child); nodeById.set(child.id, child);
-        if (V_CACHE.has(child.value)) child.verdict = V_CACHE.get(child.value);
       }
       addEdge(parent, child);
     }
@@ -451,7 +438,6 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
 
   const central = makeNode(query, centralKind || "", 0, "");
   central.central = true; central.expanded = true;
-  central.verdict = centralVerdict || null;
   central.x = cx; central.y = cy; central.fx = cx; central.fy = cy;
   nodes.push(central); nodeById.set(central.id, central);
 
@@ -464,7 +450,6 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
       nd = makeNode(p.value, p.kind, 1, p.relation);
       nd.x = cx + Math.cos(ang) * 130; nd.y = cy + Math.sin(ang) * 130;
       nodes.push(nd); nodeById.set(nd.id, nd);
-      if (V_CACHE.has(nd.value)) nd.verdict = V_CACHE.get(nd.value);
     }
     addEdge(central, nd);
   });
@@ -522,10 +507,7 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
     for (const nd of nodes) {
       const r = nd.central ? 11 : (nd === hovered ? 8 : 6);
       ctx.beginPath(); ctx.arc(nd.x, nd.y, r, 0, Math.PI * 2);
-      const vhue = nd.verdict ? (VERDICT_HUE[nd.verdict] || null) : null;
-      if (vhue) ctx.fillStyle = p.mark[vhue];
-      else if (nd.central) ctx.fillStyle = p.card2;
-      else ctx.fillStyle = p.mark[kindHue(nd.kind)] || p.mark.slate;
+      ctx.fillStyle = nd.central ? p.card2 : (p.mark[kindHue(nd.kind)] || p.mark.slate);
       ctx.fill();
       ctx.lineWidth = 2; ctx.strokeStyle = nd.central ? p.edge : (nd === hovered ? p.ink : p.card); ctx.stroke();
       if (nd.expanded && !nd.central) {
@@ -611,10 +593,6 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
       const data = await res.json().catch(() => null);
       nd.loading = false; nd.expanded = true;
       if (!res.ok || !data || data.error) { toast(data?.error || "expansion impossible"); if (reduce) draw(); return; }
-      // cache le verdict pour cette valeur (utilisé par draw)
-      const vlabel = data.verdict?.label || null;
-      nd.verdict = vlabel;
-      V_CACHE.set(nd.value, vlabel);
       const before = nodes.length;
       addChildren(nd, collectPivots(data));
       updateLegend();
@@ -797,16 +775,6 @@ const LANDING = [
 ];
 function buildLanding(root) {
   root.replaceChildren();
-  const stats = el("div", "lstats"); stats.id = "landingStats"; stats.hidden = true;
-  root.append(stats);
-  // Widget extraction d'IOC
-  const iocWrap = el("div", "iocex"); iocWrap.id = "iocExtract";
-  iocWrap.append(
-    el("textarea", "iocta", null, {placeholder: "Collez un rapport d'incident, des logs… les IOC seront extraits.", rows: 3}),
-    el("button", "ghost", "Extraire les IOC"),
-    el("div", "chips iocout")
-  );
-  root.append(iocWrap);
   root.append(el("p", "lintro", "Analysez n'importe quel observable, ou partez d'un exemple :"));
   const grid = el("div", "lgrid");
   for (const cat of LANDING) {
@@ -833,62 +801,6 @@ function showLanding() {
   const l = $("landing");
   if (!l.dataset.built) { buildLanding(l); l.dataset.built = "1"; }
   l.hidden = false;
-  // Dashboard : stats publiques depuis /dashboard
-  fetch("/dashboard").then(r => r.json()).then(d => {
-    if (!d.total_lookups && d.error) return;
-    const s = $("landingStats");
-    s.replaceChildren();
-    s.append(el("p", "lintro", "Dashboard — aperçu des derniers lookups :"));
-    const verdicts = d.verdicts || {};
-    const kinds = Object.entries(d.by_kind || {}).sort((a,b) => b[1] - a[1]).slice(0, 5);
-    const stat = (val, lbl) => { const c = el("div", "lstat"); c.append(el("div", "lval", String(val)), el("div", "llbl", lbl)); return c; };
-    s.append(stat(d.total_lookups || 0, "Lookups"));
-    s.append(stat(verdicts.malicious || 0, "Malveillants"));
-    s.append(stat(verdicts.suspect || 0, "Suspects"));
-    s.append(stat(verdicts.clean || 0, "Légitimes"));
-    if (kinds.length) {
-      const row = el("div", "lkinds");
-      row.append(el("span", "llbl", "Top types"));
-      for (const [k, n] of kinds) {
-        const chip = el("span", "lchip");
-        chip.style.color = `var(--h-${kindHue(k)})`;
-        chip.style.borderColor = `var(--hbd-${kindHue(k)})`;
-        chip.style.background = `var(--hbg-${kindHue(k)})`;
-        chip.textContent = `${k} ${n}`;
-        row.append(chip);
-      }
-      s.append(row);
-    }
-    s.hidden = false;
-  }).catch(() => {});
-  // Widget extraction d'IOC depuis un texte
-  const iocWrap = $("iocExtract");
-  if (iocWrap && !iocWrap.dataset.init) {
-    iocWrap.dataset.init = "1";
-    const ta = iocWrap.querySelector("textarea");
-    const btn = iocWrap.querySelector("button");
-    const out = iocWrap.querySelector(".iocout");
-    btn.onclick = async () => {
-      const txt = ta.value.trim();
-      if (!txt) return;
-      btn.disabled = true; btn.textContent = "…";
-      try {
-        const r = await fetch("/extract", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: txt}) });
-        const d = await r.json();
-        out.replaceChildren();
-        if (!d.iocs?.length) { out.append(el("span", "iocnone", "Aucun IOC détecté")); return; }
-        for (const ioc of d.iocs) {
-          const chip = el("button", "chip pchip lchip");
-          chip.style.color = `var(--h-${kindHue(ioc.type)})`;
-          chip.textContent = trunc(ioc.value, 36);
-          chip.title = ioc.value;
-          chip.onclick = () => go(ioc.value);
-          out.append(chip);
-        }
-      } catch { out.replaceChildren(el("span", "iocnone", "Erreur")); }
-      finally { btn.disabled = false; btn.textContent = "Extraire"; }
-    };
-  }
 }
 
 /* ---------- rendu global ---------- */
@@ -899,7 +811,6 @@ function render(data, info) {
   $("err").hidden = true;
   $("skeleton").hidden = true;
   $("landing").hidden = true;
-  $("landingStats").hidden = true;
 
   const rep = $("report");
   rep.hidden = false;
@@ -931,38 +842,11 @@ function render(data, info) {
   cntSig.title = data.verdict
     ? `arbitrage : ${VERDICT_META[vlabel]?.label || vlabel} — ${sigs.length} signal(aux), dont ${reds} classé(s) critique`
     : "signaux de menace détectés (critique = malicious/C2/blocklist… en rouge)";
-  // Barre de filtre : visible si ≥ 1 signal, avec compteurs.
-  const sbar = $("sbarSignals");
-  sbar.hidden = !sigs.length;
-  if (sigs.length) {
-    // Compteurs par teinte
-    const cnts = { all: sigs.length };
-    for (const s of sigs) { const h = hueOf(s.category); cnts[h] = (cnts[h] || 0) + 1; }
-    sbar.querySelectorAll(".chp").forEach((b) => {
-      const f = b.dataset.filter;
-      const n = f === "all" ? cnts.all : (cnts[f] || 0);
-      const span = b.querySelector(".fcnt");
-      if (span) span.textContent = n > 0 ? `(${n})` : "";
-      if (n === 0 && f !== "all") b.disabled = true;
-    });
-    let activeFilter = "all";
-    const applyFilter = (filter) => {
-      activeFilter = filter;
-      sbar.querySelectorAll(".chp").forEach((b) => b.classList.toggle("chp--active", b.dataset.filter === filter));
-      const filtered = filter === "all" ? sigs : sigs.filter((s) => hueOf(s.category) === filter);
-      chipList($("signals"), filtered, (s) => sigChip(s, true), 30);
-    };
-    sbar.querySelectorAll(".chp").forEach((b) => {
-      b.onclick = () => { if (!b.disabled) applyFilter(b.dataset.filter); };
-    });
-    applyFilter("all");
-  } else {
-    chipList($("signals"), sigs, (s) => sigChip(s, true), 30);
-  }
+  chipList($("signals"), sigs, (s) => sigChip(s, true), 30);
 
   $("secPivots").hidden = !pivs.length;
   $("cntPivots").textContent = pivs.length;
-  renderGraph(data.ip?.ip || data.query, data.kind, pivs, data.verdict?.label);
+  renderGraph(data.ip?.ip || data.query, data.kind, pivs);
   chipList($("pivots"), pivs, pivotChip, 40);
 
   renderSources(data);
@@ -1055,27 +939,6 @@ $("q").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { const v = $("q").value.trim(); v ? lookup(v) : lookup("", true); }
   if (e.key === "Escape") { $("q").blur(); if (ctrl) { ctrl.abort(); setLoading(false); } }
 });
-document.addEventListener("keydown", (e) => {
-  // Escape: close overlays
-  if (e.key === "Escape") {
-    if (!$("settings").hidden) { e.preventDefault(); closeSettings(); return; }
-    if (!$("comparator").hidden) { e.preventDefault(); closeComparator(); return; }
-  }
-  if (e.key === "/" && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
-    e.preventDefault(); $("q").focus(); $("q").select();
-  }
-  // Raccourci comparateur
-  if (e.key === "c" && !e.metaKey && !e.ctrlKey && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
-    e.preventDefault(); openComparator();
-  }
-  // Raccourcis filtres signaux : 1=Tous, 2=Critiques, 3=Suspects, 4=Autres
-  if (/^[1-4]$/.test(e.key) && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
-    const filters = ["all", "red", "amber", "slate"];
-    const f = filters[parseInt(e.key) - 1];
-    const btn = document.querySelector(`#sbarSignals .chp[data-filter="${f}"]`);
-    if (btn && !btn.disabled) btn.click();
-  }
-});
 /* clic sur le logo : retour accueil sans recharger (garde clic-milieu / cmd-clic natifs) */
 document.querySelector(".brand").addEventListener("click", (e) => {
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
@@ -1094,14 +957,6 @@ $("rawCopy").onclick = () => { if (CUR) copyText(JSON.stringify(CUR, null, 2)); 
 $("jsonBtn").onclick = () => {
   const d = $("rawWrap"); d.open = true;
   d.scrollIntoView({ behavior: "smooth", block: "start" });
-};
-$("exportStix").onclick = () => {
-  if (!LASTQ) return;
-  window.open(`/lookup/export?q=${encodeURIComponent(LASTQ)}&format=stix`, "_blank");
-};
-$("exportCsv").onclick = () => {
-  if (!LASTQ) return;
-  window.open(`/lookup/export?q=${encodeURIComponent(LASTQ)}&format=csv`, "_blank");
 };
 function refreshTokenBtn() {
   const has = !!token();
@@ -1222,8 +1077,8 @@ $("settings").addEventListener("keydown", (e) => {
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
 });
 
-/* ---------- comparateur ---------- */
-let CMP_RETURN = null;
+
+
 function openComparator() {
   CMP_RETURN = document.activeElement;
   $("comparator").hidden = false;
@@ -1288,69 +1143,104 @@ function renderCmpCol(col, label, data) {
       b.title = `${p.kind} \u00b7 ${p.value}`;
       b.onclick = () => { closeComparator(); go(p.value); };
       pw.append(b);
-    });
-    col.append(pw);
+    }
+
+function renderCmpCol(col, label, data) {
+  col.replaceChildren();
+  const h = el("h3", null, label);
+  h.title = label;
+  col.append(h);
+
+  if (!data) {
+    col.append(el("div", "cmpErr", "Aucune donn\u00e9e re\u00e7ue"));
+    return;
   }
-}
-async function doCompare() {
+  h.title = data.query || label;
+
+  if (data.error) {
+    col.append(el("div", "cmpErr", data.error));
+    return;
+  }
+
+  const sigs = collectSignals(data);
+  const pivs = collectPivots(data);
+  const nSrc = (data.enrichments || []).length;
+
+  // verdict banner (compact)
+  if (data.verdict) {
+    const vw = el("div", "cmpVerdict");
+    vw.append(verdictBanner(data.verdict));
+    col.append(vw);
+  }
+
+  // key info line
+  const meta = el("div", "cmpMeta");
+  meta.textContent = `${data.kind}` + (data.ip ? ` \u00b7 ${data.ip.country || ""} ${data.ip.asn ? "AS" + data.ip.asn : ""}` : "") + ` \u00b7 ${nSrc} source${nSrc > 1 ? "s" : ""}`;
+  col.append(meta);
+
+  // top signals (max 8)
+  if (sigs.length) {
+    const sw = el("div", "cmpSigs");
+    sigs.slice(0, 8).forEach((s) => sw.append(sigChip(s, false)));
+    if (sigs.length > 8) sw.append(el("span", "chip", `+ ${sigs.length - 8}`));
+    col.append(sw);
+  }
+
+  // top pivots (max 6)
+  if (pivs.length) {
+    const pw = el("div", "cmpSrcs", `${pivs.length} pivot${pivs.length > 1 ? "s" : ""}`);
+    pivs.slice(0, 6).forEach((p) => {
+      const b = el("button", "chip pchip");
+      const d = el("i", "kdot"); d.style.background = `var(--h-${kindHue(p.kind)})`;
+      b.append(d, el("span", "ctxt", trunc(p.value, 28)));
+      b.title = `${p.kind} \u00b7 ${p.value}`;
+      b.onclick = () => { closeComparator(); go(p.value); };
+      pw.append(b);
+    }
+
+/* ── V_CACHE (mutualisé entre instances du graphe) ── */
+const V_CACHE = new Map();
+
+/* ── wiring comparateur ── */
+$("cmpBtn").onclick = openComparator;
+$("cmpGo").onclick = async () => {
   const a = $("cmpA").value.trim();
   const b = $("cmpB").value.trim();
-  if (!a || !b) { toast("Remplissez les deux observables"); return; }
-
-  const btn = $("cmpGo");
-  const res = $("cmpResults");
-  btn.disabled = true; btn.textContent = "\u2026";
-  res.hidden = false;
-  res.replaceChildren(el("div", "cmpCol cmpEmpty", "Chargement\u2026"), el("div", "cmpCol cmpEmpty", "Chargement\u2026"));
-
+  if (!a || !b) return;
+  $("cmpResults").hidden = false;
+  $("cmpResults").innerHTML = '<div class="cmpWait">Recherche…</div>';
+  const t = token();
+  const body = JSON.stringify({ a, b, token: t || undefined });
   try {
-    const body = token() ? JSON.stringify({ a, b, token: token() }) : JSON.stringify({ a, b });
-    const r = await fetch("/compare", { method: "POST", headers: { "Content-Type": "application/json" }, body });
-    const data = await r.json().catch(() => null);
-    if (!r.ok || !data) throw new Error(data?.error || `erreur ${r.status}`);
-
-    const colA = el("div", "cmpCol");
-    const colB = el("div", "cmpCol");
-    renderCmpCol(colA, a, data.a);
-    renderCmpCol(colB, b, data.b);
-    res.replaceChildren(colA, colB);
+    const res = await fetch("/compare", { method: "POST", headers: { "content-type": "application/json" }, body });
+    const data = await res.json();
+    $("cmpResults").replaceChildren();
+    const wrap = el("div", "cmpCols");
+    wrap.append(renderCmpCol("A", a, data.a));
+    wrap.append(renderCmpCol("B", b, data.b));
+    $("cmpResults").append(wrap);
   } catch (err) {
-    const ea = el("div", "cmpCol"); ea.append(el("div", "cmpErr", err.message || "Erreur r\u00e9seau"));
-    const eb = el("div", "cmpCol"); eb.append(el("div", "cmpErr", err.message || "Erreur r\u00e9seau"));
-    res.replaceChildren(ea, eb);
-  } finally {
-    btn.disabled = false; btn.textContent = "Comparer";
+    $("cmpResults").innerHTML = '<div class="errmsg">Erreur lors de la comparaison.</div>';
   }
-}
-$("cmpBtn").onclick = openComparator;
-$("cmpClose").onclick = closeComparator;
-$("comparator").addEventListener("click", (e) => { if (e.target === $("comparator")) closeComparator(); });
-$("cmpGo").onclick = doCompare;
-$("cmpA").addEventListener("keydown", (e) => { if (e.key === "Enter") $("cmpB").focus(); });
-$("cmpB").addEventListener("keydown", (e) => { if (e.key === "Enter") doCompare(); });
-/* focus trap pour le comparateur */
-$("comparator").addEventListener("keydown", (e) => {
-  if (e.key !== "Tab") return;
-  const f = [...$("comparator").querySelectorAll('button, input, [href], [tabindex]:not([tabindex="-1"])')]
-    .filter((x) => !x.disabled && x.offsetParent !== null);
-  if (!f.length) return;
-  const first = f[0], last = f[f.length - 1];
-  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+};
+$("cmpA").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("cmpB").focus(); }
+});
+$("cmpB").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); $("cmpGo").click(); }
 });
 
-/* ---------- init ---------- */
-refreshTokenBtn();
-renderHist();
-const initialQ = new URLSearchParams(location.search).get("q");
-if (initialQ) { $("q").value = initialQ; lookup(initialQ); }
-else showLanding();   // sans requête : page d'accueil (champ vide + entrée = toujours l'IP du visiteur)
 
-// Service worker — force update en déréglant toutes les anciennes versions d'abord.
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(regs => {
-    regs.forEach(r => r.unregister());
-  }).finally(() => {
-    navigator.serviceWorker.register('/sw.js');
-  });
-}
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("settings").hidden) { e.preventDefault(); closeSettings(); return; }
+  if (e.key === "Escape" && !$("comparator").hidden) { e.preventDefault(); closeComparator(); return; }
+  if (e.key === "c" && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
+    e.preventDefault();
+    if ($("comparator").hidden) openComparator(); else closeComparator();
+    return;
+  }
+  if (e.key === "/" && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
+    e.preventDefault(); $("q").focus(); $("q").select();
+  }
+});
+/* ── init ── */

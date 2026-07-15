@@ -16,7 +16,7 @@ use crate::config::FeedUrls;
 
 /// Version des feeds : à bumper dès qu'on ajoute/modifie une source, pour forcer
 /// un refetch au démarrage (cf. `needs_bootstrap`). Écrite dans `.feedversion`.
-pub const FEED_VERSION: &str = "12";
+pub const FEED_VERSION: &str = "14";
 
 /// Nombre de domaines Majestic conservés pour le prior de popularité. Borne la
 /// mémoire (~6 Mo) et cadre le prior sur les domaines *réellement* majeurs :
@@ -71,6 +71,14 @@ const CLOUD_JSON: &[(&str, &str)] = &[
     ),
     ("GitHub", "https://api.github.com/meta"),
     ("Fastly", "https://api.fastly.com/public-ip-list"),
+    // Azure : la page de download MS est derrière Akamai (fingerprinting anti-bot
+    // qui bloque reqwest — curl passe, pas rustls). On passe par un mirror GitHub
+    // du JSON ServiceTags officiel, régénéré automatiquement chaque semaine.
+    // `collect_cidrs` extrait les `addressPrefixes` (~107k CIDR).
+    (
+        "Azure",
+        "https://raw.githubusercontent.com/enzo-g/azureIPranges/main/docs/json-history/ServiceTags_Public.json",
+    ),
 ];
 
 /// Clouds publiant des listes texte (une CIDR par ligne), éventuellement multi-URL.

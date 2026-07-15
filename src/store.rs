@@ -225,7 +225,11 @@ impl Store {
             .iter()
             .find(|(_, rs)| rs.contains(v))
             .map(|(name, _)| name.clone());
-        let is_dc = is_dc_list || cloud_provider.is_some();
+        // Fournisseurs identifiés par ASN (Linode/Vultr/Starlink), sans plage CIDR publiée.
+        let asn_prov = asn.and_then(asn_provider);
+        let is_dc = is_dc_list
+            || cloud_provider.is_some()
+            || asn_prov.is_some_and(|(_, cat)| cat == "datacenter");
 
         if is_tor {
             signals.push(Signal::new("tor_exit_list", "tor"));
@@ -254,6 +258,14 @@ impl Store {
                 &format!("cloud:{}", c.to_lowercase()),
                 "datacenter",
                 format!("{c} (plage cloud)"),
+            ));
+        }
+        // Attribution par ASN (Linode/Vultr = datacenter, Starlink = ISP satellite).
+        if let Some((name, cat)) = asn_prov {
+            signals.push(Signal::with_detail(
+                &format!("provider:{}", name.to_lowercase()),
+                cat,
+                format!("{name} (ASN {})", asn.unwrap_or(0)),
             ));
         }
 
@@ -376,6 +388,18 @@ fn confidence_for(
         0.8 // résidentiel : confiance dans « non anonyme »
     } else {
         0.3
+    }
+}
+
+/// Fournisseurs identifiés par leur ASN (pas de plage CIDR publiée à fetch).
+/// Renvoie (nom, catégorie de signal) : `datacenter` pour les VPS, `infra`
+/// pour un ISP (Starlink = satellite, pas un datacenter).
+fn asn_provider(asn: u32) -> Option<(&'static str, &'static str)> {
+    match asn {
+        63949 => Some(("Linode", "datacenter")), // AKAMAI-LINODE-AP
+        20473 => Some(("Vultr", "datacenter")),  // AS-VULTR / The Constant Company
+        14593 => Some(("Starlink", "infra")),    // SPACEX-STARLINK (ISP satellite)
+        _ => None,
     }
 }
 
@@ -570,5 +594,19 @@ pub fn is_bogon(ip: IpAddr) -> bool {
             ];
             bogon6.iter().any(|n| n.contains(&v6))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asn_provider_maps_known_hosts() {
+        assert_eq!(asn_provider(63949), Some(("Linode", "datacenter")));
+        assert_eq!(asn_provider(20473), Some(("Vultr", "datacenter")));
+        // Starlink = ISP satellite, pas un datacenter
+        assert_eq!(asn_provider(14593), Some(("Starlink", "infra")));
+        assert_eq!(asn_provider(15169), None); // Google, non listé ici
     }
 }

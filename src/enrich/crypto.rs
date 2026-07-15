@@ -199,6 +199,47 @@ fn build(wei: u128, nonce: u64) -> Enrichment {
     }
 }
 
+/// mempool.space (BTC) : solde + total reçu + nombre de tx. Keyless, live.
+/// Complète Etherscan (ETH) côté Bitcoin.
+pub async fn mempool(addr: &str, ctx: &Ctx) -> Enrichment {
+    if chain(addr) != "btc" {
+        return Enrichment::failed("mempool", "adresse BTC uniquement".into());
+    }
+    let url = format!("https://mempool.space/api/address/{addr}");
+    match fetch_json(&ctx.http, &url).await {
+        Ok(v) => parse_mempool(&v),
+        Err(e) => Enrichment::failed("mempool", format!("{e:#}")),
+    }
+}
+
+async fn fetch_json(http: &reqwest::Client, url: &str) -> Result<Value> {
+    Ok(http.get(url).send().await?.error_for_status()?.json().await?)
+}
+
+/// Solde = reçu − dépensé (satoshis → BTC). `chain_stats` = confirmé on-chain ;
+/// le mempool non confirmé est ignoré pour le solde.
+fn parse_mempool(v: &Value) -> Enrichment {
+    let stat = |k: &str| {
+        v.get("chain_stats")
+            .and_then(|s| s.get(k))
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+    };
+    let funded = stat("funded_txo_sum");
+    let spent = stat("spent_txo_sum");
+    let balance = (funded - spent) as f64 / 1e8;
+    let received = funded as f64 / 1e8;
+    Enrichment::ok(
+        "mempool",
+        vec![
+            Fact::new("chain", "Bitcoin"),
+            Fact::new("balance", format!("{balance:.8} BTC")),
+            Fact::new("reçu_total", format!("{received:.8} BTC")),
+            Fact::new("tx", stat("tx_count").to_string()),
+        ],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,5 +270,23 @@ mod tests {
         assert!(is_eth_tx(&format!("0x{}", "a".repeat(64))));
         assert!(!is_eth_tx(&format!("0x{}", "a".repeat(40))));
         assert!(!is_eth_tx("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"));
+    }
+
+    #[test]
+    fn mempool_parses_balance() {
+        let v = serde_json::json!({
+            "chain_stats": {
+                "funded_txo_sum": 5_722_561_471_i64,
+                "spent_txo_sum": 0,
+                "tx_count": 63639
+            }
+        });
+        let e = parse_mempool(&v);
+        assert!(
+            e.facts
+                .iter()
+                .any(|f| f.key == "balance" && f.value.starts_with("57.2"))
+        );
+        assert!(e.facts.iter().any(|f| f.key == "tx" && f.value == "63639"));
     }
 }

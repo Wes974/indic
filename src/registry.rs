@@ -12,7 +12,7 @@ use crate::enrich::{
     abuseipdb, binaryedge, blocklists, censys, certspotter, circl_hashlookup, criminalip, crtsh,
     crypto, cve, cvedb, dns, dshield, emailrep, filescan, fofa, fullhunt, github, gravatar,
     greynoise, hudsonrock, hunter, hybridanalysis, ikwyd, intelx, internetdb, ipdata, ipgeo,
-    ipinfo, ipqs, leakix, malshare, maltiverse, malwarebazaar, maxmind, metadefender, netlas,
+    ipinfo, ipqs, leakix, malshare, maltiverse, malwarebazaar, maxmind, metadefender, misp, netlas,
     onion, onyphe, opentip, osv, otx, phone, poc, proxycheck, pulsedive, quake, rdap, rdap_domain,
     rdns, ripestat, safebrowsing, scamalytics, securitytrails, shodan, stopforumspam, threatfox,
     triage, url_analysis, urlhaus, urlscan, urlscan_pro, username, validin, virustotal, vpnapi,
@@ -1519,6 +1519,38 @@ pub fn build() -> Registry {
                 _ => unreachable!(),
             }
         }
+    );
+    enricher!(
+        reg,
+        Mempool,
+        "mempool",
+        None,
+        Observable::Crypto(_),
+        TTL_THREAT,
+        false,
+        |obs, ctx| async move {
+            match obs {
+                Observable::Crypto(a) => crypto::mempool(&a, ctx).await,
+                _ => unreachable!(),
+            }
+        }
+    );
+
+    // Corrélation MISP (multi-type, lecture) : interroge le MISP du user pour
+    // dire si l'observable y est déjà documenté. Gated → seulement si autorisé.
+    enricher!(
+        reg,
+        Misp,
+        "misp",
+        Some("MISP_API_KEY"),
+        Observable::Ip(_)
+            | Observable::Domain(_)
+            | Observable::Url(_)
+            | Observable::Email(_)
+            | Observable::Hash(_),
+        TTL_THREAT,
+        false,
+        |obs: Observable, ctx| async move { misp::enrich(&obs.value(), ctx).await }
     );
 
     // Username — keyless mais gated (empêche l'énumération ouverte).

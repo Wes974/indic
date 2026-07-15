@@ -38,6 +38,7 @@ pub(crate) mod maltiverse;
 pub(crate) mod malwarebazaar;
 pub(crate) mod maxmind;
 pub(crate) mod metadefender;
+pub(crate) mod misp;
 pub(crate) mod netlas;
 pub(crate) mod onion;
 pub(crate) mod onyphe;

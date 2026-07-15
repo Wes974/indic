@@ -1237,59 +1237,119 @@ function closeComparator() {
   if (CMP_RETURN && CMP_RETURN.focus) CMP_RETURN.focus();
   else $("cmpBtn").focus();
 }
-function renderCmpCol(col, label, data) {
-  col.replaceChildren();
-  const h = el("h3", null, label);
-  h.title = label;
-  col.append(h);
-
-  if (!data) {
-    col.append(el("div", "cmpErr", "Aucune donn\u00e9e re\u00e7ue"));
-    return;
+/* ---------- comparateur : rendu diff-first ---------- */
+function cmpAttrs(d) {
+  const a = { kind: d.kind || "\u2014", country: null, asn: null, org: null,
+              verdict: null, sources: (d.enrichments || []).length };
+  if (d.ip) {
+    a.country = d.ip.country || null;
+    a.asn = d.ip.asn ? "AS" + d.ip.asn : null;
+    a.org = d.ip.org || d.ip.as_name || null;
   }
-  h.title = data.query || label;
-
-  if (data.error) {
-    col.append(el("div", "cmpErr", data.error));
-    return;
+  if (d.verdict) a.verdict = VERDICT_META[d.verdict.label]?.label || d.verdict.label;
+  return a;
+}
+function cmpRow(k, a, b, same) {
+  const r = el("div", "cmpRow");
+  const va = el("div", "cmpVa", a ?? "\u2014");
+  const vb = el("div", "cmpVb", b ?? "\u2014");
+  const mk = el("div", "cmpMk");
+  if (a != null && b != null) {
+    const eq = same != null ? same : String(a) === String(b);
+    mk.classList.add(eq ? "eq" : "ne");
+    mk.textContent = eq ? "=" : "\u2260";
+    if (!eq) { va.classList.add("d"); vb.classList.add("d"); }
   }
+  r.append(el("div", "cmpK", k), va, mk, vb);
+  return r;
+}
+/* une entr\u00e9e par cat\u00e9gorie de signal (d\u00e9dup pour le diff communs/propres) */
+function sigCats(d) {
+  const m = new Map();
+  collectSignals(d).forEach((s) => { if (!m.has(s.category)) m.set(s.category, s); });
+  return m;
+}
+function cmpHeadCol(lab, d, ok) {
+  const c = el("div", "cmpTopCol");
+  c.append(el("div", "cmpQ", trunc(lab, 30)));
+  if (ok && d.verdict) c.append(verdictBanner(d.verdict));
+  else if (!ok) c.append(el("div", "cmpErr", (d && d.error) || "aucune donn\u00e9e"));
+  return c;
+}
+function renderComparison(box, la, lb, A, B) {
+  box.replaceChildren();
+  const okA = !!(A && !A.error), okB = !!(B && !B.error);
 
-  const sigs = collectSignals(data);
-  const pivs = collectPivots(data);
-  const nSrc = (data.enrichments || []).length;
+  const head = el("div", "cmpTop");
+  head.append(cmpHeadCol(la, A, okA), el("div", "cmpVs", "\u21c4"), cmpHeadCol(lb, B, okB));
+  box.append(head);
+  if (!okA || !okB) return; // un c\u00f4t\u00e9 a \u00e9chou\u00e9 \u2192 pas de diff possible
 
-  // verdict banner (compact)
-  if (data.verdict) {
-    const vw = el("div", "cmpVerdict");
-    vw.append(verdictBanner(data.verdict));
-    col.append(vw);
-  }
+  // \u2500\u2500 relation : pivots communs + lien direct A\u2194B \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  const pa = collectPivots(A), pb = collectPivots(B);
+  const key = (p) => `${p.kind}|${p.value}`;
+  const setB = new Set(pb.map(key));
+  const shared = pa.filter((p) => setB.has(key(p)));
+  const direct = pa.some((p) => p.value === B.query) || pb.some((p) => p.value === A.query);
+  const linked = shared.length > 0 || direct;
 
-  // key info line
-  const meta = el("div", "cmpMeta");
-  meta.textContent = `${data.kind}` + (data.ip ? ` \u00b7 ${data.ip.country || ""} ${data.ip.asn ? "AS" + data.ip.asn : ""}` : "") + ` \u00b7 ${nSrc} source${nSrc > 1 ? "s" : ""}`;
-  col.append(meta);
-
-  // top signals (max 8)
-  if (sigs.length) {
-    const sw = el("div", "cmpSigs");
-    sigs.slice(0, 8).forEach((s) => sw.append(sigChip(s, false)));
-    if (sigs.length > 8) sw.append(el("span", "chip", `+ ${sigs.length - 8}`));
-    col.append(sw);
-  }
-
-  // top pivots (max 6)
-  if (pivs.length) {
-    const pw = el("div", "cmpSrcs", `${pivs.length} pivot${pivs.length > 1 ? "s" : ""}`);
-    pivs.slice(0, 6).forEach((p) => {
+  const rel = el("div", "cmpRel " + (linked ? "linked" : "indep"));
+  const nShared = shared.length;
+  const plural = nShared > 1 ? "s" : "";
+  let txt;
+  if (direct) txt = "Li\u00e9s \u2014 lien direct" + (nShared ? ` + ${nShared} pivot${plural} commun${plural}` : "");
+  else if (nShared) txt = `Li\u00e9s \u2014 ${nShared} pivot${plural} commun${plural}`;
+  else txt = "Ind\u00e9pendants \u2014 aucun pivot commun";
+  const rh = el("div", "cmpRelHead");
+  rh.append(el("span", "cmpRelIco", linked ? "\ud83d\udd17" : "\u2298"), el("span", "cmpRelTxt", txt));
+  rel.append(rh);
+  if (nShared) {
+    const sw = el("div", "cmpShared");
+    shared.slice(0, 8).forEach((p) => {
       const b = el("button", "chip pchip");
-      const d = el("i", "kdot"); d.style.background = `var(--h-${kindHue(p.kind)})`;
-      b.append(d, el("span", "ctxt", trunc(p.value, 28)));
+      const dot = el("i", "kdot"); dot.style.background = `var(--h-${kindHue(p.kind)})`;
+      b.append(dot, el("span", "ctxt", trunc(p.value, 32)));
       b.title = `${p.kind} \u00b7 ${p.value}`;
       b.onclick = () => { closeComparator(); go(p.value); };
-      pw.append(b);
+      sw.append(b);
     });
-    col.append(pw);
+    if (nShared > 8) sw.append(el("span", "chip", `+ ${nShared - 8}`));
+    rel.append(sw);
+  }
+  box.append(rel);
+
+  // \u2500\u2500 tableau align\u00e9 A | B \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  const at = cmpAttrs(A), bt = cmpAttrs(B);
+  const tbl = el("div", "cmpTbl");
+  const hdr = el("div", "cmpRow cmpHdr");
+  hdr.append(el("div", "cmpK", ""), el("div", "cmpVa", "A"), el("div", "cmpMk", ""), el("div", "cmpVb", "B"));
+  tbl.append(hdr, cmpRow("Type", at.kind, bt.kind));
+  if (at.country || bt.country) tbl.append(cmpRow("Pays", at.country, bt.country));
+  if (at.asn || bt.asn) tbl.append(cmpRow("ASN", at.asn, bt.asn));
+  if (at.org || bt.org) tbl.append(cmpRow("Org", at.org ? trunc(at.org, 22) : null, bt.org ? trunc(bt.org, 22) : null, (at.org || "") === (bt.org || "")));
+  tbl.append(cmpRow("Verdict", at.verdict, bt.verdict));
+  tbl.append(cmpRow("Sources", String(at.sources), String(bt.sources), at.sources === bt.sources));
+  box.append(tbl);
+
+  // \u2500\u2500 diff des signaux : communs / propres \u00e0 A / propres \u00e0 B \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  const ca = sigCats(A), cb = sigCats(B);
+  const common = [...ca.keys()].filter((k) => cb.has(k));
+  const onlyA = [...ca.keys()].filter((k) => !cb.has(k));
+  const onlyB = [...cb.keys()].filter((k) => !ca.has(k));
+  if (common.length || onlyA.length || onlyB.length) {
+    const sd = el("div", "cmpSigDiff");
+    const grp = (title, keys, src, cls) => {
+      if (!keys.length) return;
+      const g = el("div", "cmpSigGrp " + cls);
+      g.append(el("div", "cmpSigT", title));
+      const w = el("div", "cmpSigW");
+      keys.forEach((k) => w.append(sigChip(src.get(k), false)));
+      g.append(w); sd.append(g);
+    };
+    grp("Communs", common, ca, "gCommon");
+    grp("Propres \u00e0 A", onlyA, ca, "gA");
+    grp("Propres \u00e0 B", onlyB, cb, "gB");
+    box.append(sd);
   }
 }
 async function doCompare() {
@@ -1301,23 +1361,16 @@ async function doCompare() {
   const res = $("cmpResults");
   btn.disabled = true; btn.textContent = "\u2026";
   res.hidden = false;
-  res.replaceChildren(el("div", "cmpCol cmpEmpty", "Chargement\u2026"), el("div", "cmpCol cmpEmpty", "Chargement\u2026"));
+  res.replaceChildren(el("div", "cmpLoading", "Comparaison\u2026"));
 
   try {
     const body = token() ? JSON.stringify({ a, b, token: token() }) : JSON.stringify({ a, b });
     const r = await fetch("/compare", { method: "POST", headers: { "Content-Type": "application/json" }, body });
     const data = await r.json().catch(() => null);
     if (!r.ok || !data) throw new Error(data?.error || `erreur ${r.status}`);
-
-    const colA = el("div", "cmpCol");
-    const colB = el("div", "cmpCol");
-    renderCmpCol(colA, a, data.a);
-    renderCmpCol(colB, b, data.b);
-    res.replaceChildren(colA, colB);
+    renderComparison(res, a, b, data.a, data.b);
   } catch (err) {
-    const ea = el("div", "cmpCol"); ea.append(el("div", "cmpErr", err.message || "Erreur r\u00e9seau"));
-    const eb = el("div", "cmpCol"); eb.append(el("div", "cmpErr", err.message || "Erreur r\u00e9seau"));
-    res.replaceChildren(ea, eb);
+    res.replaceChildren(el("div", "cmpErr", err.message || "Erreur r\u00e9seau"));
   } finally {
     btn.disabled = false; btn.textContent = "Comparer";
   }

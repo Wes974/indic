@@ -49,10 +49,10 @@ async fn fetch(
     let mut pivots = Vec::new();
 
     // ── Alexa rank ──────────────────────────────────────────────────────
-    if let Some(rank) = v.get("alexa_rank").and_then(|x| x.as_i64()) {
-        if rank > 0 {
-            facts.push(Fact::new("alexa_rank", rank.to_string()));
-        }
+    if let Some(rank) = v.get("alexa_rank").and_then(|x| x.as_i64())
+        && rank > 0
+    {
+        facts.push(Fact::new("alexa_rank", rank.to_string()));
     }
 
     // ── WHOIS (registrar, dates) — extraits s'ils sont présents ──────────
@@ -181,7 +181,7 @@ fn is_recent(date_str: &str, max_days: i64) -> bool {
     let y: i64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     let m: i64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     let day: i64 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
-    if y < 2020 || m < 1 || m > 12 || day < 1 || day > 31 {
+    if y < 2020 || !(1..=12).contains(&m) || !(1..=31).contains(&day) {
         return false;
     }
     // Jours depuis 1970-01-01 (approximation suffisante pour ≤ 30 j).

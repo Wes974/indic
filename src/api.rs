@@ -56,10 +56,12 @@ pub fn router(ctx: SharedCtx) -> Router {
         // Alias historiques (compat).
         .route("/v1/check", get(check_query))
         .route("/ip/{addr}", get(check_path))
-        .layer(tower_http::cors::CorsLayer::new()
-            .allow_origin(tower_http::cors::Any)
-            .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
-            .allow_headers(tower_http::cors::Any))
+        .layer(
+            tower_http::cors::CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST])
+                .allow_headers(tower_http::cors::Any),
+        )
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(axum::middleware::from_fn(security_headers))
         .layer(tower_http::limit::RequestBodyLimitLayer::new(1024 * 1024))
@@ -728,6 +730,7 @@ async fn compare(
     let auth = authorized(&ctx, &headers, body.token.as_deref());
     let (a, b) = tokio::join!(
         async {
+            match Observable::detect(&body.a) {
                 Some(o) => Some(enrich::run(&body.a, &o, &ctx, auth).await),
                 None => None,
             }
@@ -751,7 +754,11 @@ async fn chaos_test(Query(p): Query<ChaosQ>) -> Response {
     }
     if let Some(code) = p.error {
         let status = StatusCode::from_u16(code).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-        return (status, Json(json!({ "error": format!("chaos: erreur injectée {code}") }))).into_response();
+        return (
+            status,
+            Json(json!({ "error": format!("chaos: erreur injectée {code}") })),
+        )
+            .into_response();
     }
     Json(json!({ "chaos": "ok", "delay_ms": p.delay, "error_code": p.error })).into_response()
 }

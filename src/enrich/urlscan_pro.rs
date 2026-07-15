@@ -4,7 +4,6 @@
 //! Auth: header `API-Key`. Gated (clé séparée `URLSCAN_PRO_API_KEY`).
 
 use anyhow::Result;
-use serde::Deserialize;
 use serde_json::Value;
 
 use crate::enrich::{Ctx, Enrichment, Fact};
@@ -45,10 +44,7 @@ async fn fetch(
     let mut signals = Vec::new();
 
     // Total de scans disponibles
-    let total = v
-        .get("total")
-        .and_then(|x| x.as_u64())
-        .unwrap_or(0);
+    let total = v.get("total").and_then(|x| x.as_u64()).unwrap_or(0);
     facts.push(Fact::new("scans", total.to_string()));
 
     // Résultats
@@ -127,11 +123,7 @@ async fn fetch(
             uniq.dedup();
             format!("{malicious_count} scans — {}", uniq.join(", "))
         };
-        signals.push(Signal::with_detail(
-            "urlscan_pro",
-            "malicious",
-            detail,
-        ));
+        signals.push(Signal::with_detail("urlscan_pro", "malicious", detail));
     } else if suspicious_count > 0 {
         signals.push(Signal::with_detail(
             "urlscan_pro",
@@ -185,10 +177,8 @@ mod tests {
         // réponse vide pour éviter des dépendances lourdes.
         // Ce test couvre le cas où total=0 et results=[], qui doit
         // produire des facts sans erreur.
-        let json: Value = serde_json::from_str(
-            r#"{"total":0,"results":[],"has_more":false}"#,
-        )
-        .unwrap();
+        let json: Value =
+            serde_json::from_str(r#"{"total":0,"results":[],"has_more":false}"#).unwrap();
         assert_eq!(json.get("total").and_then(|x| x.as_u64()), Some(0));
         let results = json
             .get("results")
@@ -238,10 +228,7 @@ mod tests {
         let total = json.get("total").and_then(|x| x.as_u64()).unwrap_or(0);
         assert_eq!(total, 3);
 
-        let results = json
-            .get("results")
-            .and_then(|x| x.as_array())
-            .unwrap();
+        let results = json.get("results").and_then(|x| x.as_array()).unwrap();
 
         let mut malicious_count = 0u64;
         for res in results {

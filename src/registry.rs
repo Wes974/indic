@@ -13,10 +13,10 @@ use crate::enrich::{
     crypto, cve, cvedb, dns, dshield, emailrep, filescan, fofa, fullhunt, github, gravatar,
     greynoise, hudsonrock, hunter, hybridanalysis, ikwyd, intelx, internetdb, ipdata, ipgeo,
     ipinfo, ipqs, leakix, malshare, maltiverse, malwarebazaar, maxmind, metadefender, netlas,
-    onion, opentip, osv, otx, phone, poc, proxycheck, pulsedive, quake, rdap, rdap_domain, rdns,
-    ripestat, safebrowsing, scamalytics, shodan, stopforumspam, threatfox, triage, url_analysis,
-    urlhaus, urlscan, urlscan_pro, username, validin, virustotal, vpnapi, vulncheck, vulners, wayback,
-    zoomeye,
+    onion, onyphe, opentip, osv, otx, phone, poc, proxycheck, pulsedive, quake, rdap, rdap_domain,
+    rdns, ripestat, safebrowsing, scamalytics, securitytrails, shodan, stopforumspam, threatfox,
+    triage, url_analysis, urlhaus, urlscan, urlscan_pro, username, validin, virustotal, vpnapi,
+    vulncheck, vulners, wayback, zoomeye,
 };
 
 // ── TTL constants (mirrored from enrich.rs) ──────────────────────────────
@@ -469,6 +469,22 @@ pub fn build() -> Registry {
             }
         }
     );
+
+    enricher!(
+        reg,
+        OnypheIp,
+        "onyphe",
+        Some("ONYPHE_API_KEY"),
+        Observable::Ip(_),
+        TTL_THREAT,
+        false,
+        |obs, ctx| async move {
+            match obs {
+                Observable::Ip(ip) => onyphe::enrich_ip(ip, ctx).await,
+                _ => unreachable!(),
+            }
+        }
+    );
     enricher!(
         reg,
         Fofa,
@@ -810,6 +826,22 @@ pub fn build() -> Registry {
             }
         }
     );
+
+    enricher!(
+        reg,
+        OnypheDomain,
+        "onyphe",
+        Some("ONYPHE_API_KEY"),
+        Observable::Domain(_),
+        TTL_THREAT,
+        false,
+        |obs, ctx| async move {
+            match obs {
+                Observable::Domain(d) => onyphe::enrich_domain(&d, ctx).await,
+                _ => unreachable!(),
+            }
+        }
+    );
     enricher!(
         reg,
         SafeBrowsingDomain,
@@ -881,6 +913,22 @@ pub fn build() -> Registry {
         |obs, ctx| async move {
             match obs {
                 Observable::Domain(d) => pulsedive::enrich_domain(&d, ctx).await,
+                _ => unreachable!(),
+            }
+        }
+    );
+
+    enricher!(
+        reg,
+        SecurityTrails,
+        "securitytrails",
+        Some("SECURITYTRAILS_API_KEY"),
+        Observable::Domain(_),
+        TTL_RDAP,
+        false,
+        |obs, ctx| async move {
+            match obs {
+                Observable::Domain(d) => securitytrails::enrich_domain(&d, ctx).await,
                 _ => unreachable!(),
             }
         }

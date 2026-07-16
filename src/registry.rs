@@ -1507,6 +1507,21 @@ pub fn build() -> Registry {
     );
     enricher!(
         reg,
+        Ransomwhere,
+        "ransomwhere",
+        None,
+        Observable::Crypto(_),
+        TTL_THREAT,
+        false,
+        |obs, ctx| async move {
+            match obs {
+                Observable::Crypto(a) => crypto::ransomwhere(&a, ctx).await,
+                _ => unreachable!(),
+            }
+        }
+    );
+    enricher!(
+        reg,
         Etherscan,
         "etherscan",
         Some("ETHERSCAN_API_KEY"),

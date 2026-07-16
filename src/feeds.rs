@@ -16,7 +16,7 @@ use crate::config::FeedUrls;
 
 /// Version des feeds : à bumper dès qu'on ajoute/modifie une source, pour forcer
 /// un refetch au démarrage (cf. `needs_bootstrap`). Écrite dans `.feedversion`.
-pub const FEED_VERSION: &str = "14";
+pub const FEED_VERSION: &str = "15";
 
 /// Nombre de domaines Majestic conservés pour le prior de popularité. Borne la
 /// mémoire (~6 Mo) et cadre le prior sur les domaines *réellement* majeurs :
@@ -170,6 +170,10 @@ pub async fn update_all(data_dir: &Path, urls: &FeedUrls) -> Result<()> {
     )
     .await;
 
+    // Ransomwhere : adresses BTC ayant reçu des paiements de ransomware, avec la
+    // famille (Locky, Conti, Netwalker…). Export JSON (api.ransomwhe.re).
+    fetch_ransomwhere(&client, &data_dir.join("ransomware.txt")).await;
+
     // VPN par provider (data/vpnprov/) : le nom de fichier = clé provider affichée.
     let vpnprov_dir = data_dir.join("vpnprov");
     let _ = tokio::fs::create_dir_all(&vpnprov_dir).await;
@@ -245,6 +249,39 @@ async fn fetch_cloud_json(client: &Client, url: &str, dest: &Path) {
             }
         }
         Err(e) => tracing::error!("téléchargement {url} : {e:#}"),
+    }
+}
+
+/// Export Ransomwhere (JSON `{result:[{address,family,…}]}`) → une ligne
+/// `adresse<TAB>famille` par entrée (toutes BTC).
+async fn fetch_ransomwhere(client: &Client, dest: &Path) {
+    const URL: &str = "https://api.ransomwhe.re/export";
+    match download_text(client, URL).await {
+        Ok(body) => {
+            let mut out = String::new();
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                let entries = v.get("result").and_then(|r| r.as_array());
+                for entry in entries.into_iter().flatten() {
+                    let Some(addr) = entry.get("address").and_then(|a| a.as_str()) else {
+                        continue;
+                    };
+                    let family = entry
+                        .get("family")
+                        .and_then(|f| f.as_str())
+                        .unwrap_or("inconnu");
+                    out.push_str(addr);
+                    out.push('\t');
+                    out.push_str(family);
+                    out.push('\n');
+                }
+            }
+            if out.is_empty() {
+                tracing::warn!("aucune adresse extraite de {URL}");
+            } else {
+                write_out(dest, out.as_bytes(), URL).await;
+            }
+        }
+        Err(e) => tracing::error!("téléchargement {URL} : {e:#}"),
     }
 }
 

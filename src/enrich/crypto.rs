@@ -240,6 +240,35 @@ fn parse_mempool(v: &Value) -> Enrichment {
     )
 }
 
+/// Ransomwhere (offline) : adresse BTC ayant reçu des paiements de ransomware,
+/// avec la famille (Locky, Conti, Netwalker…). Keyless.
+pub async fn ransomwhere(addr: &str, ctx: &Ctx) -> Enrichment {
+    if chain(addr) != "btc" {
+        return Enrichment::failed("ransomwhere", "adresse BTC uniquement".into());
+    }
+    let store = ctx.store.load();
+    let mut facts = Vec::new();
+    let mut signals = Vec::new();
+    match store.ransomware_family(addr) {
+        Some(family) => {
+            facts.push(Fact::new("ransomware", format!("OUI — {family}")));
+            signals.push(Signal::with_detail(
+                "ransomwhere",
+                "malicious",
+                format!("adresse de ransomware ({family})"),
+            ));
+        }
+        None => facts.push(Fact::new("ransomware", "non listée")),
+    }
+    Enrichment {
+        source: "ransomwhere".into(),
+        facts,
+        signals,
+        pivots: vec![],
+        error: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

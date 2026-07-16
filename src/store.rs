@@ -44,6 +44,8 @@ pub struct Store {
     asn_drop: HashSet<u32>,
     /// Adresses crypto sanctionnées (OFAC SDN) : ETH minuscule, BTC tel quel.
     ofac_crypto: HashSet<String>,
+    /// Adresses BTC de ransomware → famille (Ransomwhere : Locky, Conti…).
+    ransomware: HashMap<String, String>,
     /// Apex des domaines les plus populaires (Majestic top-N) : prior de
     /// légitimité pour le verdict (neutralise les signaux dus au contenu hébergé).
     popular_domains: HashSet<String>,
@@ -85,6 +87,7 @@ impl Store {
         let cloud_providers = load_range_dir(&data_dir.join("cloud"));
         let asn_drop = load_asn_set(&data_dir.join("asndrop.txt"));
         let ofac_crypto = load_crypto_set(&data_dir.join("ofac_crypto.txt"));
+        let ransomware = load_ransomware(&data_dir.join("ransomware.txt"));
         let popular_domains = load_domain_set(&data_dir.join("popular.txt"));
         let poc_cves = load_poc_cves(&data_dir.join("poc_cves.txt"));
         let geoip = maxminddb::Reader::open_readfile(data_dir.join("GeoLite2-City.mmdb")).ok();
@@ -103,6 +106,7 @@ impl Store {
             cloud_providers = cloud_providers.len(),
             asn_drop = asn_drop.len(),
             ofac_crypto = ofac_crypto.len(),
+            ransomware = ransomware.len(),
             popular_domains = popular_domains.len(),
             poc_cves = poc_cves.len(),
             geoip = geoip.is_some(),
@@ -123,6 +127,7 @@ impl Store {
             cloud_providers,
             asn_drop,
             ofac_crypto,
+            ransomware,
             popular_domains,
             poc_cves,
             geoip,
@@ -159,6 +164,11 @@ impl Store {
     /// être en minuscules (comme fournie par `Observable::detect`).
     pub fn is_sanctioned_crypto(&self, addr: &str) -> bool {
         self.ofac_crypto.contains(addr)
+    }
+
+    /// Famille de ransomware d'une adresse BTC (Ransomwhere), si connue.
+    pub fn ransomware_family(&self, addr: &str) -> Option<&str> {
+        self.ransomware.get(addr).map(String::as_str)
     }
 
     /// L'apex fait-il partie des domaines majeurs (Majestic top-N) ? Prior de
@@ -448,6 +458,21 @@ fn load_asn_set(path: &Path) -> HashSet<u32> {
 
 /// Charge les adresses crypto sanctionnées. Les ETH (`0x…`) sont normalisées en
 /// minuscules (hex insensible à la casse) ; les BTC restent telles quelles.
+/// Charge les adresses de ransomware (`adresse<TAB>famille` par ligne, Ransomwhere).
+fn load_ransomware(path: &Path) -> HashMap<String, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => text
+            .lines()
+            .filter_map(|l| {
+                let (addr, family) = l.split_once('\t')?;
+                let addr = addr.trim();
+                (!addr.is_empty()).then(|| (addr.to_string(), family.trim().to_string()))
+            })
+            .collect(),
+        Err(_) => HashMap::new(),
+    }
+}
+
 fn load_crypto_set(path: &Path) -> HashSet<String> {
     match std::fs::read_to_string(path) {
         Ok(text) => text

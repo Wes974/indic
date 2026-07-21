@@ -113,9 +113,14 @@ async fn healthz() -> &'static str {
 ///
 /// La mise à jour repose sur `skipWaiting` + `clients.claim` + le versionnage
 /// de `CACHE` : bumper la version purge les caches précédents à l'activation.
+///
+/// `Cache-Control: no-cache` est indispensable : sans en-tête explicite,
+/// Cloudflare applique son TTL par défaut aux `.js` (4 h) et continue de servir
+/// l'ancien worker longtemps après un déploiement — un correctif de SW resterait
+/// invisible en prod.
 async fn service_worker() -> (
     StatusCode,
-    [(axum::http::header::HeaderName, &'static str); 1],
+    [(axum::http::header::HeaderName, &'static str); 2],
     &'static str,
 ) {
     // v3 : purge les caches v1/v2, qui contenaient les réponses /lookup.
@@ -145,7 +150,10 @@ self.addEventListener('fetch', (e) => {
 "#;
     (
         StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "application/javascript")],
+        [
+            (axum::http::header::CONTENT_TYPE, "application/javascript"),
+            (axum::http::header::CACHE_CONTROL, "no-cache"),
+        ],
         sw,
     )
 }

@@ -213,7 +213,13 @@ pub async fn mempool(addr: &str, ctx: &Ctx) -> Enrichment {
 }
 
 async fn fetch_json(http: &reqwest::Client, url: &str) -> Result<Value> {
-    Ok(http.get(url).send().await?.error_for_status()?.json().await?)
+    Ok(http
+        .get(url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
 }
 
 /// Solde = reçu − dépensé (satoshis → BTC). `chain_stats` = confirmé on-chain ;

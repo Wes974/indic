@@ -69,7 +69,10 @@ fn parse(v: &Value) -> (Vec<Fact>, Vec<Signal>) {
     let mut tags: Vec<String> = Vec::new();
     for a in &attrs {
         let eid = a.get("event_id").and_then(Value::as_str).unwrap_or("?");
-        let info = a.pointer("/Event/info").and_then(Value::as_str).unwrap_or("");
+        let info = a
+            .pointer("/Event/info")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         if !events.iter().any(|(id, _)| id == eid) {
             events.push((eid.to_string(), info.to_string()));
         }
@@ -86,7 +89,10 @@ fn parse(v: &Value) -> (Vec<Fact>, Vec<Signal>) {
     let mut facts = vec![Fact::new("misp_events", n.to_string())];
     if let Some((id, info)) = events.first() {
         let info: String = info.chars().take(70).collect();
-        facts.push(Fact::new("misp_event", format!("#{id} {info}").trim().to_string()));
+        facts.push(Fact::new(
+            "misp_event",
+            format!("#{id} {info}").trim().to_string(),
+        ));
     }
     if !tags.is_empty() {
         let shown: Vec<String> = tags.iter().take(6).cloned().collect();
@@ -125,9 +131,21 @@ mod tests {
         });
         let (facts, signals) = parse(&v);
         // 2 attributs mais 1 seul event distinct
-        assert!(facts.iter().any(|f| f.key == "misp_events" && f.value == "1"));
-        assert!(facts.iter().any(|f| f.key == "misp_event" && f.value.contains("#42")));
-        assert!(facts.iter().any(|f| f.key == "misp_tags" && f.value.contains("tlp:white")));
+        assert!(
+            facts
+                .iter()
+                .any(|f| f.key == "misp_events" && f.value == "1")
+        );
+        assert!(
+            facts
+                .iter()
+                .any(|f| f.key == "misp_event" && f.value.contains("#42"))
+        );
+        assert!(
+            facts
+                .iter()
+                .any(|f| f.key == "misp_tags" && f.value.contains("tlp:white"))
+        );
         assert_eq!(signals.len(), 1);
         assert_eq!(signals[0].category, "threat");
     }

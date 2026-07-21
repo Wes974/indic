@@ -113,6 +113,30 @@ const NEG_TTL: Duration = Duration::from_secs(600);
 /// Plus court que le timeout du client HTTP (15 s) pour cadrer aussi les
 /// enrichers multi-requêtes. Un dépassement → erreur → négativement cachée.
 const ENRICHER_TIMEOUT: Duration = Duration::from_secs(10);
+/// TTL du cache négatif pour une erreur de **rate-limit / quota** (HTTP 429).
+/// Bien plus long que `NEG_TTL` : retaper une API dont le quota est épuisé ne
+/// produit que des rejets — et chez certains fournisseurs (Validin) une
+/// notification de quota par jour. On recule jusqu'au reset probable.
+const RATE_LIMIT_TTL: Duration = Duration::from_secs(6 * 3600);
+/// Quotas journaliers **durs** côté fournisseur, appliqués localement avec une
+/// marge (on s'arrête juste en dessous). Empêche d'émettre le moindre appel une
+/// fois le plafond atteint → aucun 429, donc aucun mail de quota.
+const DAILY_QUOTA: &[(&str, u32)] = &[
+    ("validin", 9), // free tier = 10/jour
+];
+
+/// Vrai si l'erreur d'un enricher traduit un rate-limit / quota épuisé.
+fn is_rate_limited(err: &str) -> bool {
+    err.contains("429") || err.to_ascii_lowercase().contains("too many requests")
+}
+
+/// Quota journalier local d'une source (`None` = pas de plafond).
+fn daily_quota(source: &str) -> Option<u32> {
+    DAILY_QUOTA
+        .iter()
+        .find(|(s, _)| *s == source)
+        .map(|(_, n)| *n)
+}
 
 /// Compteurs atomiques par source, pour l'endpoint `/metrics`.
 #[derive(Default)]
@@ -147,6 +171,9 @@ pub struct Cache {
     host_sems: Mutex<HashMap<String, Arc<Semaphore>>>,
     /// Compteurs par source (ok/err/cache-hit/latence), créés à la volée.
     stats: Mutex<HashMap<String, Arc<SourceStat>>>,
+    /// Appels du jour par source, pour les sources à quota journalier dur.
+    /// `(jour depuis l'epoch, compteurs)` — remis à zéro au changement de jour.
+    daily: Mutex<(u64, HashMap<String, u32>)>,
 }
 
 impl Default for Cache {
@@ -156,6 +183,7 @@ impl Default for Cache {
             sem: Semaphore::new(OUTBOUND_MAX),
             host_sems: Mutex::new(HashMap::new()),
             stats: Mutex::new(HashMap::new()),
+            daily: Mutex::new((0, HashMap::new())),
         }
     }
 }
@@ -169,6 +197,29 @@ impl Cache {
             .entry(source.to_string())
             .or_insert_with(|| Arc::new(Semaphore::new(PER_SOURCE_MAX)))
             .clone()
+    }
+
+    /// Réserve un appel dans le quota journalier de `source`.
+    /// `false` = plafond atteint aujourd'hui → aucun appel réseau ne doit
+    /// partir. Le compteur se remet à zéro au changement de jour (UTC).
+    fn take_daily_slot(&self, source: &str) -> bool {
+        let Some(limit) = daily_quota(source) else {
+            return true; // pas de plafond pour cette source
+        };
+        let today = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() / 86_400)
+            .unwrap_or(0);
+        let mut guard = self.daily.lock();
+        if guard.0 != today {
+            *guard = (today, HashMap::new());
+        }
+        let used = guard.1.entry(source.to_string()).or_insert(0);
+        if *used >= limit {
+            return false;
+        }
+        *used += 1;
+        true
     }
 
     /// Compteur d'une source (créé à la volée).
@@ -225,6 +276,18 @@ impl Cache {
             hit.source = format!("{} (cache)", hit.source);
             return hit;
         }
+        // Quota journalier local : on s'arrête AVANT d'émettre l'appel, donc la
+        // source ne voit jamais de dépassement (pas de 429, pas de mail).
+        if !self.take_daily_slot(&source) {
+            let limit = daily_quota(&source).unwrap_or(0);
+            let enr = Enrichment::failed(
+                &source,
+                format!("quota journalier local atteint ({limit}/j) — réessai demain"),
+            );
+            self.stat(&source).err.fetch_add(1, Ordering::Relaxed);
+            self.insert_bounded(key, enr.clone());
+            return enr;
+        }
         // Sur un vrai appel réseau : borne d'abord la concurrence par source
         // (≈ par hôte, protège les quotas free-tier), puis la globale. Ordre
         // source→globale : on ne retient un permis global qu'une fois prêt à
@@ -275,17 +338,52 @@ impl Cache {
         let map = self.inner.lock();
         let (at, enr) = map.get(key)?;
         // Entrée en erreur → TTL court (NEG_TTL) : on retente la source plus
-        // vite qu'un succès mémorisé.
-        let effective = if enr.error.is_some() { NEG_TTL } else { ttl };
+        // vite qu'un succès mémorisé. Exception : un rate-limit (429) recule
+        // beaucoup plus longtemps — insister ne fait que collecter des rejets.
+        let effective = match enr.error.as_deref() {
+            Some(e) if is_rate_limited(e) => RATE_LIMIT_TTL,
+            Some(_) => NEG_TTL,
+            None => ttl,
+        };
         (at.elapsed() < effective).then(|| enr.clone())
     }
 }
 
 #[cfg(test)]
 mod cache_throttle_tests {
-    use super::{Cache, PER_SOURCE_MAX};
+    use super::{Cache, PER_SOURCE_MAX, daily_quota, is_rate_limited};
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn rate_limit_is_detected() {
+        assert!(is_rate_limited(
+            "HTTP status client error (429 Too Many Requests) for url (https://app.validin.com/...)"
+        ));
+        assert!(is_rate_limited("too many requests"));
+        // Une erreur ordinaire garde le TTL négatif court.
+        assert!(!is_rate_limited(
+            "HTTP status client error (400 Bad Request)"
+        ));
+        assert!(!is_rate_limited("timeout (> 10 s)"));
+    }
+
+    #[test]
+    fn daily_slot_caps_quota_source() {
+        let cache = Cache::default();
+        let limit = daily_quota("validin").expect("validin a un quota journalier");
+        // On peut consommer exactement `limit` appels…
+        for _ in 0..limit {
+            assert!(cache.take_daily_slot("validin"));
+        }
+        // …puis c'est fermé jusqu'au lendemain.
+        assert!(!cache.take_daily_slot("validin"));
+        // Une source sans plafond n'est jamais bloquée.
+        assert!(daily_quota("dns").is_none());
+        for _ in 0..100 {
+            assert!(cache.take_daily_slot("dns"));
+        }
+    }
 
     #[test]
     fn per_source_semaphore_is_stable_and_capped() {

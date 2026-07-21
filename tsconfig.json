@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "//": [
+    "Type-check du front SANS étape de build : le JS reste servi tel quel,",
+    "inliné par build.rs. tsc ne fait que vérifier (noEmit) les annotations",
+    "JSDoc de src/web/app.js. Lancé par `npm run check` dans e2e/ et par la CI.",
+    "strictNullChecks est le réglage qui compte : c'est lui qui aurait attrapé",
+    "le déréférencement de #landingStats avec ?q= au chargement."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "noUnusedLocals": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/web/app.js", "src/web/dom.d.ts"]
+}

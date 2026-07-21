@@ -167,6 +167,51 @@ self.addEventListener('fetch', (e) => {
 "#;
 
 #[cfg(test)]
+mod web_tests {
+    /// L'union `StaticId` de `dom.d.ts` autorise `$()` à renvoyer un élément
+    /// non-nullable : elle n'est valide que si elle décrit exactement les `id`
+    /// d'`index.html`. Un id retiré du HTML mais laissé dans l'union rendrait
+    /// `$()` menteur — précisément le trou par lequel `#landingStats` est passé.
+    #[test]
+    fn static_ids_match_index_html() {
+        let html = include_str!("web/index.html");
+        let mut from_html: Vec<&str> = html
+            .split("id=\"")
+            .skip(1)
+            .filter_map(|s| s.split('"').next())
+            .collect();
+        from_html.sort_unstable();
+        from_html.dedup();
+
+        let dts = include_str!("web/dom.d.ts");
+        let union = dts
+            .split_once("type StaticId =")
+            .expect("union StaticId introuvable dans dom.d.ts")
+            .1;
+        let mut from_dts: Vec<&str> = union
+            .split("| \"")
+            .skip(1)
+            .filter_map(|s| s.split('"').next())
+            .collect();
+        from_dts.sort_unstable();
+
+        let missing: Vec<_> = from_html
+            .iter()
+            .filter(|id| !from_dts.contains(id))
+            .collect();
+        let extra: Vec<_> = from_dts
+            .iter()
+            .filter(|id| !from_html.contains(id))
+            .collect();
+        assert!(
+            missing.is_empty() && extra.is_empty(),
+            "src/web/dom.d.ts a dérivé d'index.html\n  absents de l'union : {missing:?}\n  \
+             absents du HTML : {extra:?}"
+        );
+    }
+}
+
+#[cfg(test)]
 mod sw_tests {
     use super::SW_JS;
 

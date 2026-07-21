@@ -38,15 +38,22 @@ jobs:
           cache-dependency-path: e2e/package-lock.json
       - name: Syntaxe JS
         run: node --check src/web/app.js
+      - name: Dépendances e2e
+        working-directory: e2e
+        run: npm ci
+      # Type-check JSDoc (tsc --checkJs --noEmit) : aucun build, aucun artefact,
+      # le JS reste servi tel quel. C'est ce qui attrape les arités fausses et
+      # les déréférencements possiblement nuls.
+      - name: Type-check du front
+        working-directory: e2e
+        run: npm run check
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build du binaire (servi à Playwright)
         run: cargo build
-      - name: Dépendances e2e
+      - name: Navigateur Playwright
         working-directory: e2e
-        run: |
-          npm ci
-          npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium
       - name: Tests e2e
         working-directory: e2e
         run: npx playwright test

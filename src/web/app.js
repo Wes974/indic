@@ -1,5 +1,28 @@
 "use strict";
-const $ = (id) => document.getElementById(id);
+/**
+ * Élément garanti par le balisage statique d'index.html. Le type `StaticId`
+ * (dom.d.ts) restreint les identifiants acceptés, ce qui autorise un retour
+ * non-nullable : si l'id est dans index.html, l'élément existe.
+ * Pour un élément créé à l'exécution, utiliser {@link $opt}.
+ * @param {StaticId} id
+ * @returns {HTMLElement}
+ */
+const $ = (id) => /** @type {HTMLElement} */ (document.getElementById(id));
+/**
+ * Élément qui peut ne pas exister encore (créé par le JS, pas par index.html).
+ * Le retour nullable force l'appelant à traiter le cas absent.
+ * @param {string} id
+ * @returns {HTMLElement | null}
+ */
+const $opt = (id) => document.getElementById(id);
+/** @param {StaticId} id @returns {HTMLInputElement} */
+const $input = (id) => /** @type {HTMLInputElement} */ ($(id));
+/** @param {StaticId} id @returns {HTMLTextAreaElement} */
+const $area = (id) => /** @type {HTMLTextAreaElement} */ ($(id));
+/** @param {StaticId} id @returns {HTMLButtonElement} */
+const $btn = (id) => /** @type {HTMLButtonElement} */ ($(id));
+/** @param {StaticId} id @returns {HTMLDetailsElement} */
+const $det = (id) => /** @type {HTMLDetailsElement} */ ($(id));
 const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
@@ -57,11 +80,12 @@ function trapFocus(node) {
 const token = () => LS.get("indic_token", "");
 
 /* ---------- thème ---------- */
+/** @type {ReturnType<typeof createPivotGraph> | null} */
 let GRAPH = null;   // instance du graphe de pivots (déclarée tôt : applyTheme la référence)
 const V_CACHE = new Map();   // cache verdict labels per value (évite refetcher le verdict)
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
-  $("mTheme").content = t === "dark" ? "#0a0e13" : "#f3f5f8";
+  /** @type {HTMLMetaElement} */ ($("mTheme")).content = t === "dark" ? "#0a0e13" : "#f3f5f8";
   $("icoMoon").style.display = t === "dark" ? "" : "none";
   $("icoSun").style.display  = t === "dark" ? "none" : "";
   const tb = $("themeBtn");
@@ -415,11 +439,21 @@ const VERDICT_HUE = { malicious: "red", suspect: "amber", clean: "green" };
 function createPivotGraph(card, leg, query, centralKind, initialPivots, centralVerdict) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  // Le simulateur force-directed manipule des nœuds mutables enrichis au fil de
+  // l'exécution (dx/dy/fx/fy ajoutés par les passes physiques). Les typer
+  // précisément coûterait plus que ça ne rapporte ici : on se contente de
+  // sortir de l'inférence `never` due au littéral vide.
+  /** @type {any[]} */
   const nodes = [];
+  /** @type {Map<string, any>} */
   const nodeById = new Map();
+  /** @type {any[]} */
   const edges = [];
+  /** @type {Set<string>} */
   const edgeSet = new Set();
-  let hovered = null, capped = false;
+  /** @type {any} */
+  let hovered = null;
+  let capped = false;
 
   let W = Math.max(320, Math.round(card.clientWidth || 760));
   const H = 440;
@@ -446,10 +480,15 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  let palTheme = null, pal = null;
+  /** @type {string | undefined} */
+  let palTheme;
+  /** @type {ReturnType<typeof graphPalette> | undefined} */
+  let pal;
+  // palette() résout toujours `pal` avant de le renvoyer : le retour est donc
+  // non-nullable, ce que le type ci-dessous rend explicite pour les appelants.
   function palette() {
     const th = document.documentElement.dataset.theme;
-    if (th !== palTheme) { pal = graphPalette(); palTheme = th; }
+    if (th !== palTheme || !pal) { pal = graphPalette(); palTheme = th; }
     return pal;
   }
 
@@ -579,7 +618,9 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
   }
 
   /* --- boucle d'animation (aucune si reduced-motion) --- */
-  let raf = null, running = false;
+  /** @type {number | null} */
+  let raf = null;
+  let running = false;
   const anyLoading = () => nodes.some((n) => n.loading);
   function frame() {
     if (running) { frStep(); frStep(); if (temp < 0.6) running = false; }
@@ -594,7 +635,9 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
 
   /* --- hit-test + interactions --- */
   function nodeAt(mx, my) {
-    let best = null, bd = Infinity;
+      /** @type {any} */
+    let best = null;
+    let bd = Infinity;
     for (const nd of nodes) {
       const dx = nd.x - mx, dy = nd.y - my, d2 = dx * dx + dy * dy;
       const rr = nd.central ? 14 : 11;
@@ -651,7 +694,7 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
       if (capped) { toast("graphe plafonné (60 nœuds)"); capped = false; }
       if (nodes.length !== before) reheat(); else if (reduce) draw();
     } catch (err) {
-      if (err.name === "AbortError") return;
+      if (err instanceof Error && err.name === "AbortError") return;
       nd.loading = false; toast("expansion impossible"); if (reduce) draw();
     }
   }
@@ -666,7 +709,8 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
     }
   }
 
-  let rTimer = null;
+  /** @type {number | undefined} */
+  let rTimer;
   function onResize() {
     clearTimeout(rTimer);
     rTimer = setTimeout(() => { fit(); reduce ? draw() : reheat(); }, 160);
@@ -681,7 +725,7 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
   if (reduce) { solveStatic(320); draw(); } else { running = true; startLoop(); }
 
   return {
-    redraw() { palTheme = null; if (raf) return; draw(); },   // ex. changement de thème
+    redraw() { palTheme = undefined; if (raf) return; draw(); },   // ex. changement de thème
     destroy() {
       gctrl.abort();
       if (raf) cancelAnimationFrame(raf);
@@ -746,7 +790,7 @@ function renderSources(data) {
   const oks = all.filter((e) => !e.error);
   const rank = (e) => ((e.facts?.length || 0) + (e.signals?.length || 0) + (e.pivots?.length || 0) ? 0 : 1);
   oks.sort((a, b) => rank(a) - rank(b));
-  $("cntSources").textContent = oks.length;          // le compteur ne reflète que les sources exploitables
+  $("cntSources").textContent = String(oks.length);          // le compteur ne reflète que les sources exploitables
   $("secSources").hidden = !all.length;
   oks.forEach((e) => w.append(srcCard(e)));
 
@@ -755,7 +799,7 @@ function renderSources(data) {
   const listEl = $("srcErrList"); listEl.replaceChildren();
   if (errs.length) {
     wrap.hidden = false;
-    wrap.open = false;
+    /** @type {HTMLDetailsElement} */ (wrap).open = false;
     const plur = errs.length > 1 ? "s" : "";
     $("srcErrSummary").textContent = `${errs.length} source${plur} indisponible${plur} (clé · quota · non supporté)`;
     for (const e of errs) {
@@ -865,7 +909,9 @@ function showLanding() {
   // Dashboard : stats publiques depuis /dashboard
   fetch("/dashboard").then(r => r.json()).then(d => {
     if (!d.total_lookups && d.error) return;
-    const s = $("landingStats");
+    // Créé par buildLanding() : absent tant que la landing n'a pas été montée.
+    const s = $opt("landingStats");
+    if (!s) return;
     s.replaceChildren();
     s.append(el("p", "lintro", "Dashboard — aperçu des derniers lookups :"));
     const verdicts = d.verdicts || {};
@@ -893,6 +939,7 @@ function showLanding() {
 }
 
 /* ---------- rendu global ---------- */
+/** @type {any} */
 let CUR = null;
 let FROM_PIVOT = false;   // true seulement quand le rendu suit une navigation via go() (pivot/graphe/historique)
 function render(data, info) {
@@ -902,7 +949,7 @@ function render(data, info) {
   $("landing").hidden = true;
   // La landing est construite paresseusement : avec ?q=… au chargement elle ne
   // l'a jamais été, et #landingStats n'existe pas encore.
-  const lstats = $("landingStats");
+  const lstats = $opt("landingStats");
   if (lstats) lstats.hidden = true;
 
   const rep = $("report");
@@ -926,12 +973,13 @@ function render(data, info) {
   // ton du compteur : suit le verdict quand il existe et n'est pas "malicious"
   // (évite un « N critique » rouge sous un bandeau « Propre »). Sinon : rouge si signaux critiques.
   const vlabel = data.verdict?.label;
+  /** @type {string | null} */
   let tone = null;                                  // neutre
   if (data.verdict && vlabel !== "malicious") tone = vlabel === "suspect" ? "amber" : null; // clean → neutre
   else if (reds > 0) tone = "red";                  // malicious ou type sans verdict
   cntSig.classList.toggle("c-red", tone === "red");
   cntSig.classList.toggle("c-amber", tone === "amber");
-  cntSig.textContent = reds > 0 ? `${sigs.length} dont ${reds} critique${reds > 1 ? "s" : ""}` : sigs.length;
+  cntSig.textContent = reds > 0 ? `${sigs.length} dont ${reds} critique${reds > 1 ? "s" : ""}` : String(sigs.length);
   cntSig.title = data.verdict
     ? `arbitrage : ${VERDICT_META[vlabel]?.label || vlabel} — ${sigs.length} signal(aux), dont ${reds} classé(s) critique`
     : "signaux de menace détectés (critique = malicious/C2/blocklist… en rouge)";
@@ -942,21 +990,21 @@ function render(data, info) {
     // Compteurs par teinte
     const cnts = { all: sigs.length };
     for (const s of sigs) { const h = hueOf(s.category); cnts[h] = (cnts[h] || 0) + 1; }
-    sbar.querySelectorAll(".chp").forEach((b) => {
+    /** @type {NodeListOf<HTMLButtonElement>} */
+    const chips = sbar.querySelectorAll(".chp");
+    chips.forEach((b) => {
       const f = b.dataset.filter;
       const n = f === "all" ? cnts.all : (cnts[f] || 0);
       const span = b.querySelector(".fcnt");
       if (span) span.textContent = n > 0 ? `(${n})` : "";
       if (n === 0 && f !== "all") b.disabled = true;
     });
-    let activeFilter = "all";
     const applyFilter = (filter) => {
-      activeFilter = filter;
-      sbar.querySelectorAll(".chp").forEach((b) => b.classList.toggle("chp--active", b.dataset.filter === filter));
+      chips.forEach((b) => b.classList.toggle("chp--active", b.dataset.filter === filter));
       const filtered = filter === "all" ? sigs : sigs.filter((s) => hueOf(s.category) === filter);
       chipList($("signals"), filtered, (s) => sigChip(s, true), 30);
     };
-    sbar.querySelectorAll(".chp").forEach((b) => {
+    chips.forEach((b) => {
       b.onclick = () => { if (!b.disabled) applyFilter(b.dataset.filter); };
     });
     applyFilter("all");
@@ -965,7 +1013,7 @@ function render(data, info) {
   }
 
   $("secPivots").hidden = !pivs.length;
-  $("cntPivots").textContent = pivs.length;
+  $("cntPivots").textContent = String(pivs.length);
   renderGraph(data.ip?.ip || data.query, data.kind, pivs, data.verdict?.label);
   chipList($("pivots"), pivs, pivotChip, 40);
 
@@ -973,7 +1021,7 @@ function render(data, info) {
 
   const nSrc = (data.enrichments || []).length;
   $("elapsed").textContent = `${(info.ms / 1000).toFixed(2)} s · ${nSrc} source${nSrc > 1 ? "s" : ""}`;
-  $("rawWrap").open = false;
+  $det("rawWrap").open = false;
   $("raw").textContent = JSON.stringify(data, null, 2);
 
   rep.classList.remove("enter"); void rep.offsetWidth; rep.classList.add("enter");
@@ -984,10 +1032,11 @@ function render(data, info) {
 }
 
 /* ---------- lookup ---------- */
+/** @type {AbortController | null} */
 let ctrl = null;
 function setLoading(on) {
   $("progress").classList.toggle("on", on);
-  const wrap = document.querySelector("main.wrap");
+  const wrap = /** @type {HTMLElement} */ (document.querySelector("main.wrap"));
   if (on) { wrap.setAttribute("aria-busy", "true"); $("landing").hidden = true; }
   else wrap.removeAttribute("aria-busy");
   const rep = $("report");
@@ -1028,6 +1077,7 @@ async function lookup(raw, self = false) {
   if (token()) opts.headers = { "x-indic-token": token() };
   try {
     const res = await fetch(url, opts);
+    /** @type {any} */
     let data = null;
     try { data = await res.json(); } catch {}
     if (!res.ok || !data || data.error) {
@@ -1040,23 +1090,23 @@ async function lookup(raw, self = false) {
     if (self) u.searchParams.delete("q"); else u.searchParams.set("q", data.query);
     history.replaceState(null, "", u);
   } catch (err) {
-    if (err.name === "AbortError") return;
+    if (err instanceof Error && err.name === "AbortError") return;
     failLookup("erreur réseau — API injoignable ?");
   } finally {
     if (my === ctrl) setLoading(false);
   }
 }
 function go(q) {
-  $("q").value = q;
+  $input("q").value = q;
   FROM_PIVOT = true;
   window.scrollTo({ top: 0, behavior: "smooth" });
   lookup(q);
 }
 
 /* ---------- interactions ---------- */
-$("goBtn").onclick = () => { const v = $("q").value.trim(); v ? lookup(v) : lookup("", true); };
+$("goBtn").onclick = () => { const v = $input("q").value.trim(); v ? lookup(v) : lookup("", true); };
 $("q").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { const v = $("q").value.trim(); v ? lookup(v) : lookup("", true); }
+  if (e.key === "Enter") { const v = $input("q").value.trim(); v ? lookup(v) : lookup("", true); }
   if (e.key === "Escape") { $("q").blur(); if (ctrl) { ctrl.abort(); setLoading(false); } }
 });
 document.addEventListener("keydown", (e) => {
@@ -1068,7 +1118,7 @@ document.addEventListener("keydown", (e) => {
   }
   const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "");
   if (e.key === "/" && !typing) {
-    e.preventDefault(); $("q").focus(); $("q").select();
+    e.preventDefault(); $("q").focus(); $input("q").select();
   }
   // Raccourcis : c = comparer la fiche courante, e = extracteur d'IOC
   if (e.key === "c" && !e.metaKey && !e.ctrlKey && !typing) {
@@ -1081,19 +1131,21 @@ document.addEventListener("keydown", (e) => {
   if (/^[1-4]$/.test(e.key) && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
     const filters = ["all", "red", "amber", "slate"];
     const f = filters[parseInt(e.key) - 1];
-    const btn = document.querySelector(`#sbarSignals .chp[data-filter="${f}"]`);
+    const btn = /** @type {HTMLButtonElement | null} */ (
+      document.querySelector(`#sbarSignals .chp[data-filter="${f}"]`));
     if (btn && !btn.disabled) btn.click();
   }
 });
 /* clic sur le logo : retour accueil sans recharger (garde clic-milieu / cmd-clic natifs) */
-document.querySelector(".brand").addEventListener("click", (e) => {
-  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+/** @type {HTMLElement} */ (document.querySelector(".brand")).addEventListener("click", (e) => {
+  const me = /** @type {MouseEvent} */ (e);
+  if (me.metaKey || me.ctrlKey || me.shiftKey || me.button !== 0) return;
   e.preventDefault();
   if (ctrl) ctrl.abort();
   setLoading(false);
   $("report").hidden = true;
   $("err").hidden = true;
-  $("q").value = "";
+  $input("q").value = "";
   const u = new URL(location.href); u.searchParams.delete("q"); history.replaceState(null, "", u);
   showLanding();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1101,7 +1153,7 @@ document.querySelector(".brand").addEventListener("click", (e) => {
 $("obsCopy").onclick = () => copyText($("obsText").textContent);
 $("rawCopy").onclick = () => { if (CUR) copyText(JSON.stringify(CUR, null, 2)); };
 $("jsonBtn").onclick = () => {
-  const d = $("rawWrap"); d.open = true;
+  const d = $det("rawWrap"); d.open = true;
   d.scrollIntoView({ behavior: "smooth", block: "start" });
 };
 $("exportStix").onclick = () => {
@@ -1128,6 +1180,7 @@ $("tokenBtn").onclick = () => {
 };
 
 /* ---------- réglages (overlay token + statut clés API) ---------- */
+/** @type {HTMLElement | null} */
 let SET_RETURN = null;   // élément à re-focus à la fermeture
 function setMsg(text, kind) {
   const m = $("setMsg");
@@ -1185,9 +1238,9 @@ async function loadSettings() {
   }
 }
 function openSettings() {
-  SET_RETURN = document.activeElement;
+  SET_RETURN = /** @type {HTMLElement | null} */ (document.activeElement);
   $("settings").hidden = false;
-  const inp = $("setToken");
+  const inp = $input("setToken");
   inp.value = token(); inp.type = "password";
   $("setEye").classList.remove("on");
   $("setEye").setAttribute("aria-pressed", "false");
@@ -1205,7 +1258,7 @@ $("settingsBtn").onclick = openSettings;
 $("setClose").onclick = closeSettings;
 $("settings").addEventListener("click", (e) => { if (e.target === $("settings")) closeSettings(); });
 $("setEye").onclick = () => {
-  const inp = $("setToken"), show = inp.type === "password";
+  const inp = $input("setToken"), show = inp.type === "password";
   inp.type = show ? "text" : "password";
   $("setEye").classList.toggle("on", show);
   $("setEye").setAttribute("aria-pressed", show ? "true" : "false");
@@ -1213,7 +1266,7 @@ $("setEye").onclick = () => {
   inp.focus();
 };
 $("setSave").onclick = () => {
-  const v = $("setToken").value.trim();
+  const v = $input("setToken").value.trim();
   if (v) { LS.set("indic_token", v); setMsg("Token enregistré.", "ok"); }
   else { LS.del("indic_token"); setMsg("Token effacé.", ""); }
   refreshTokenBtn();
@@ -1223,9 +1276,10 @@ $("setToken").addEventListener("keydown", (e) => { if (e.key === "Enter") $("set
 trapFocus($("settings"));
 
 /* ---------- extracteur d'IOC (overlay) ---------- */
+/** @type {HTMLElement | null} */
 let EX_RETURN = null;
 function openExtractor() {
-  EX_RETURN = document.activeElement;
+  EX_RETURN = /** @type {HTMLElement | null} */ (document.activeElement);
   $("extractor").hidden = false;
   requestAnimationFrame(() => $("exText").focus());
 }
@@ -1270,8 +1324,8 @@ function renderExtract(out, iocs) {
   }
 }
 async function doExtract() {
-  const txt = $("exText").value.trim();
-  const out = $("exOut"), btn = $("exGo");
+  const txt = $area("exText").value.trim();
+  const out = $("exOut"), btn = $btn("exGo");
   if (!txt) { toast("Collez d'abord un texte"); $("exText").focus(); return; }
   btn.disabled = true; btn.textContent = "…";
   out.hidden = false;
@@ -1302,6 +1356,7 @@ trapFocus($("extractor"));
    Le comparateur part toujours du rapport affiché (le « sujet ») : comparer deux
    inconnus depuis l'accueil n'avait pas de sens et laissait un formulaire vide
    au milieu de la page. */
+/** @type {HTMLElement | null} */
 let CMP_RETURN = null;
 const CMP_MAX_EXTRA = 2;
 function cmpReady() { return !!(CUR && CUR.query); }
@@ -1312,7 +1367,7 @@ function addSlotC() {
 }
 function dropSlotC() {
   $("cmpSlotC").hidden = true;
-  $("cmpC").value = "";
+  $input("cmpC").value = "";
   $("cmpAdd").hidden = false;
 }
 function openComparator() {
@@ -1321,7 +1376,7 @@ function openComparator() {
     $("q").focus();
     return;
   }
-  CMP_RETURN = document.activeElement;
+  CMP_RETURN = /** @type {HTMLElement | null} */ (document.activeElement);
   const box = $("cmpSubject");
   box.replaceChildren();
   const dot = el("i", "kdot"); dot.style.background = `var(--h-${kindHue(CUR.kind)})`;
@@ -1329,7 +1384,7 @@ function openComparator() {
   box.title = CUR.query;
   $("cmpSubtitle").textContent = CUR.kind ? `sujet · ${CUR.kind}` : "";
   dropSlotC();
-  $("cmpB").value = "";
+  $input("cmpB").value = "";
   const res = $("cmpResults"); res.hidden = true; res.replaceChildren();
   $("comparator").hidden = false;
   requestAnimationFrame(() => $("cmpB").focus());
@@ -1342,6 +1397,8 @@ function closeComparator() {
 
 /* ---------- comparateur : rendu diff-first ---------- */
 function cmpAttrs(d) {
+  /** @type {{kind: string|null, country: string|null, asn: string|null, org: string|null,
+   *   infra: string|null, anon: string|null, verdict: string|null, sources: string}} */
   const a = { kind: d.kind || null, country: null, asn: null, org: null, infra: null,
               anon: null, verdict: null, sources: String((d.enrichments || []).length) };
   const ip = d.ip;
@@ -1497,15 +1554,15 @@ function renderComparison(box, labels, reports) {
 }
 async function doCompare() {
   if (!cmpReady()) return;
-  const b = $("cmpB").value.trim();
+  const b = $input("cmpB").value.trim();
   if (!b) { toast("Indiquez au moins un observable à comparer"); $("cmpB").focus(); return; }
   const items = [CUR.query, b];
   if (!$("cmpSlotC").hidden) {
-    const c = $("cmpC").value.trim();
+    const c = $input("cmpC").value.trim();
     if (c) items.push(c);
   }
 
-  const btn = $("cmpGo");
+  const btn = $btn("cmpGo");
   const res = $("cmpResults");
   btn.disabled = true; btn.textContent = "…";
   res.hidden = false;
@@ -1523,7 +1580,7 @@ async function doCompare() {
     const reports = Array.isArray(data.items) ? data.items : [data.a, data.b];
     renderComparison(res, items, reports);
   } catch (err) {
-    res.replaceChildren(el("div", "cmpErr", err.message || "Erreur réseau"));
+    res.replaceChildren(el("div", "cmpErr", (err instanceof Error && err.message) || "Erreur réseau"));
   } finally {
     btn.disabled = false; btn.textContent = "Comparer";
   }
@@ -1542,7 +1599,7 @@ trapFocus($("comparator"));
 refreshTokenBtn();
 renderHist();
 const initialQ = new URLSearchParams(location.search).get("q");
-if (initialQ) { $("q").value = initialQ; lookup(initialQ); }
+if (initialQ) { $input("q").value = initialQ; lookup(initialQ); }
 else showLanding();   // sans requête : page d'accueil (champ vide + entrée = toujours l'IP du visiteur)
 
 // Service worker : simple enregistrement. La mise à jour est gérée côté SW par

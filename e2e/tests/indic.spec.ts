@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
 
+// Sans datasets offline (INDIC_SKIP_BOOTSTRAP), un lookup à froid part en
+// RDAP/rDNS live : compter large, sinon le gate CI clignote.
+const LOOKUP = 30_000;
+
 test.describe('Landing page', () => {
   test('loads with search input and brand', async ({ page }) => {
     await page.goto('/');
@@ -32,14 +36,14 @@ test.describe('IP lookup', () => {
     await page.fill('#q', '8.8.8.8');
     await page.click('#goBtn');
     // Le rapport devrait apparaître
-    await expect(page.locator('#report')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#report')).toBeVisible({ timeout: LOOKUP });
     // Le verdict devrait être présent
-    await expect(page.locator('#verdict')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('#verdict')).toBeVisible({ timeout: LOOKUP });
   });
 
   test('searches via URL query param', async ({ page }) => {
     await page.goto('/?q=1.1.1.1');
-    await expect(page.locator('#report')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#report')).toBeVisible({ timeout: LOOKUP });
   });
 
   test('empty search falls back to the visitor IP', async ({ page }) => {
@@ -48,7 +52,7 @@ test.describe('IP lookup', () => {
     await page.click('#goBtn');
     // champ vide = lookup de sa propre IP : rapport, ou erreur si elle est privée
     await expect(page.locator('#report').or(page.locator('#err')).first())
-      .toBeVisible({ timeout: 15000 });
+      .toBeVisible({ timeout: LOOKUP });
   });
 });
 
@@ -57,7 +61,7 @@ test.describe('Domain lookup', () => {
     await page.goto('/');
     await page.fill('#q', 'example.com');
     await page.click('#goBtn');
-    await expect(page.locator('#report')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#report')).toBeVisible({ timeout: LOOKUP });
   });
 });
 
@@ -66,7 +70,7 @@ test.describe('Domain lookup', () => {
 test.describe('Comparator', () => {
   const openReport = async (page, q: string) => {
     await page.goto(`/?q=${encodeURIComponent(q)}`);
-    await expect(page.locator('#report')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('#report')).toBeVisible({ timeout: LOOKUP });
   };
 
   test('is not reachable from the landing page', async ({ page }) => {
@@ -102,7 +106,7 @@ test.describe('Comparator', () => {
     await page.click('#cmpBtn');
     await page.fill('#cmpB', '1.1.1.1');
     await page.click('#cmpGo');
-    await expect(page.locator('#cmpResults .cmpTbl')).toBeVisible({ timeout: 25000 });
+    await expect(page.locator('#cmpResults .cmpTbl')).toBeVisible({ timeout: LOOKUP });
     await expect(page.locator('#cmpResults .cmpCol')).toHaveCount(2);
     await expect(page.locator('#cmpResults .cmpRel')).toBeVisible();
   });
@@ -114,7 +118,7 @@ test.describe('Comparator', () => {
     await page.click('#cmpAdd');
     await page.fill('#cmpC', '9.9.9.9');
     await page.click('#cmpGo');
-    await expect(page.locator('#cmpResults .cmpTbl')).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('#cmpResults .cmpTbl')).toBeVisible({ timeout: LOOKUP });
     await expect(page.locator('#cmpResults .cmpCol')).toHaveCount(3);
   });
 });
@@ -128,7 +132,7 @@ test.describe('IOC extractor', () => {
     await expect(page.locator('#extractor')).toBeVisible({ timeout: 3000 });
     await page.fill('#exText', SAMPLE);
     await page.click('#exGo');
-    await expect(page.locator('#exOut .exGrp').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#exOut .exGrp').first()).toBeVisible({ timeout: LOOKUP });
     await expect(page.locator('#exOut .exSum')).toContainText('IOC');
   });
 
@@ -138,6 +142,32 @@ test.describe('IOC extractor', () => {
     await expect(page.locator('#extractor')).toBeVisible({ timeout: 3000 });
     await page.keyboard.press('Escape');
     await expect(page.locator('#extractor')).toBeHidden({ timeout: 2000 });
+  });
+});
+
+// Le SW est une chaîne dans src/api.rs : `node --check` ne le voit pas, seul un
+// vrai navigateur peut confirmer qu'il s'enregistre. Et il ne doit JAMAIS mettre
+// en cache les réponses d'API — ça laisserait sur le disque la trace de chaque
+// observable analysé.
+test.describe('Service worker', () => {
+  test('registers and keeps API responses out of the cache', async ({ page }) => {
+    await page.goto('/');
+    const scope = await page.evaluate(() => navigator.serviceWorker.ready.then((r) => r.scope));
+    expect(scope).toContain('127.0.0.1:8099');
+
+    await page.goto('/?q=8.8.8.8');
+    await expect(page.locator('#report')).toBeVisible({ timeout: LOOKUP });
+
+    const cached = await page.evaluate(async () => {
+      const urls: string[] = [];
+      for (const name of await caches.keys()) {
+        const c = await caches.open(name);
+        for (const req of await c.keys()) urls.push(req.url);
+      }
+      return urls;
+    });
+    expect(cached.filter((u) => u.includes('/lookup'))).toEqual([]);
+    expect(cached.filter((u) => u.includes('/compare'))).toEqual([]);
   });
 });
 
@@ -173,9 +203,9 @@ test.describe('Graph', () => {
     await page.goto('/');
     await page.fill('#q', 'google.com');
     await page.click('#goBtn');
-    await expect(page.locator('#report')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('#report')).toBeVisible({ timeout: LOOKUP });
     // le graphe n'apparaît qu'au-delà de 3 pivots — sinon la section reste repliée
-    await expect(page.locator('#secPivots')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#secPivots')).toBeVisible({ timeout: LOOKUP });
   });
 });
 
@@ -184,8 +214,8 @@ test.describe('Export', () => {
     await page.goto('/');
     await page.fill('#q', '8.8.8.8');
     await page.click('#goBtn');
-    await expect(page.locator('#report')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#report')).toBeVisible({ timeout: LOOKUP });
     // Le bouton STIX devrait être visible
-    await expect(page.locator('#exportStix')).toBeVisible({ timeout: 3000 });
+    await expect(page.locator('#exportStix')).toBeVisible({ timeout: LOOKUP });
   });
 });

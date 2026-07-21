@@ -106,13 +106,43 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
-/// Service worker pour le support PWA hors-ligne (network-first, fallback cache).
+/// Service worker PWA : network-first avec repli sur le cache, **et uniquement
+/// pour la coquille HTML**. Les réponses d'API ne sont jamais mises en cache —
+/// elles laisseraient sur le disque du visiteur la trace de chaque observable
+/// analysé, sans borne de taille ni expiration.
+///
+/// La mise à jour repose sur `skipWaiting` + `clients.claim` + le versionnage
+/// de `CACHE` : bumper la version purge les caches précédents à l'activation.
 async fn service_worker() -> (
     StatusCode,
     [(axum::http::header::HeaderName, &'static str); 1],
     &'static str,
 ) {
-    let sw = "const CACHE='indic-v2';self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))));e.waitUntil(self.clients.claim())});self.addEventListener('fetch',e=>{e.respondWith(fetch(e.request).then(r=>{const c=r.clone();caches.open(CACHE).then(ca=>ca.put(e.request,c));return r}).catch(()=>caches.match(e.request)))});";
+    // v3 : purge les caches v1/v2, qui contenaient les réponses /lookup.
+    let sw = r#"const CACHE = 'indic-v3';
+self.addEventListener('install', (e) => e.waitUntil(self.skipWaiting()));
+self.addEventListener('activate', (e) => {
+  e.waitUntil(
+    caches.keys()
+      .then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
+});
+self.addEventListener('fetch', (e) => {
+  // Tout ce qui n'est pas une navigation (donc /lookup, /compare, /extract,
+  // /dashboard…) passe au réseau sans jamais être stocké.
+  if (e.request.mode !== 'navigate') return;
+  e.respondWith(
+    fetch(e.request)
+      .then((r) => {
+        const copy = r.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        return r;
+      })
+      .catch(() => caches.match(e.request).then((r) => r || Response.error()))
+  );
+});
+"#;
     (
         StatusCode::OK,
         [(axum::http::header::CONTENT_TYPE, "application/javascript")],

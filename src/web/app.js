@@ -1545,11 +1545,10 @@ const initialQ = new URLSearchParams(location.search).get("q");
 if (initialQ) { $("q").value = initialQ; lookup(initialQ); }
 else showLanding();   // sans requête : page d'accueil (champ vide + entrée = toujours l'IP du visiteur)
 
-// Service worker — force update en déréglant toutes les anciennes versions d'abord.
+// Service worker : simple enregistrement. La mise à jour est gérée côté SW par
+// le versionnage du cache + clients.claim() ; désinscrire à chaque chargement
+// (ce qu'on faisait avant) le démolissait avant qu'il prenne le contrôle de la
+// page, donc le fallback hors-ligne ne fonctionnait jamais.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.getRegistrations().then(regs => {
-    regs.forEach(r => r.unregister());
-  }).finally(() => {
-    navigator.serviceWorker.register('/sw.js');
-  });
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }

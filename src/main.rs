@@ -208,9 +208,16 @@ fn build_ctx(cfg: &Config) -> Result<Arc<enrich::Ctx>> {
 }
 
 async fn serve(cfg: Config) -> Result<()> {
+    // `INDIC_SKIP_BOOTSTRAP=1` : démarre sans datasets (tests e2e / CI). Les
+    // lookups restent servis par les sources live (RDAP, rDNS…), seules les
+    // listes offline sont vides — évite ~40 Mo de téléchargements par run.
+    let skip_bootstrap =
+        std::env::var("INDIC_SKIP_BOOTSTRAP").is_ok_and(|v| v == "1" || v == "true");
     // Bootstrap : si les datasets sont absents (premier run, ou v6 pas encore
     // téléchargé sur un volume préexistant), on télécharge avant de servir.
-    if feeds::needs_bootstrap(&cfg.data_dir) {
+    if skip_bootstrap {
+        tracing::warn!("INDIC_SKIP_BOOTSTRAP=1 — démarrage sans datasets offline");
+    } else if feeds::needs_bootstrap(&cfg.data_dir) {
         tracing::info!("datasets absents ou version de feeds obsolète — bootstrap…");
         if let Err(e) = feeds::update_all(&cfg.data_dir, &FeedUrls::default()).await {
             tracing::error!("bootstrap échoué : {e:#}");

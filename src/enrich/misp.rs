@@ -74,10 +74,10 @@ fn parse(v: &Value) -> (Vec<Fact>, Vec<Signal>) {
             events.push((eid.to_string(), info.to_string()));
         }
         for t in a.get("Tag").and_then(Value::as_array).into_iter().flatten() {
-            if let Some(name) = t.get("name").and_then(Value::as_str) {
-                if !tags.iter().any(|x| x == name) {
-                    tags.push(name.to_string());
-                }
+            if let Some(name) = t.get("name").and_then(Value::as_str)
+                && !tags.iter().any(|x| x == name)
+            {
+                tags.push(name.to_string());
             }
         }
     }

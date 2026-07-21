@@ -34,11 +34,11 @@
     <button class="go" id="goBtn">lookup</button>
   </div>
   <div class="ctl">
-    <button class="iconbtn" id="cmpBtn" title="Comparateur" aria-label="Ouvrir le comparateur" aria-haspopup="dialog">
+    <button class="iconbtn" id="extractBtn" title="Extracteur d'IOC (e)" aria-label="Extraire des IOC d'un texte" aria-haspopup="dialog">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-        <rect x="2" y="3" width="9" height="18" rx="1.5"/>
-        <rect x="13" y="3" width="9" height="18" rx="1.5"/>
-        <path d="M6.5 8v4M11 10H6M17.5 8v4M22 10h-4.5"/>
+        <path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21H15"/>
+        <path d="M8.5 8h5M8.5 12h3"/>
+        <circle cx="17.5" cy="15.5" r="3.4"/><path d="m20.2 18.2 2 2"/>
       </svg>
     </button>
     <button class="iconbtn" id="tokenBtn" title="Token enrichers premium" aria-label="Configurer le token premium">
@@ -96,6 +96,15 @@
       <div class="meta">
         <span class="ms" id="elapsed"></span>
         <span class="exports">
+          <button class="ghost ghost--cmp" id="cmpBtn" aria-haspopup="dialog"
+                  title="Comparer cet observable à 1 ou 2 autres (c)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+              <rect x="2" y="3" width="9" height="18" rx="1.5"/>
+              <rect x="13" y="3" width="9" height="18" rx="1.5"/>
+              <path d="M6.5 8v4M11 10H6M17.5 8v4M22 10h-4.5"/>
+            </svg>
+            Comparer
+          </button>
           <button class="ghost" id="exportStix">STIX</button>
           <button class="ghost" id="exportCsv">CSV</button>
           <button class="ghost" id="jsonBtn">json</button>
@@ -143,8 +152,9 @@
   </section>
 
   <footer>
-    <span>indic · CTI perso · ASN / rDNS / RDAP / listes OSS — le proxy résidentiel n'est pas couvert par les listes gratuites.</span>
-    <span><b>/</b> focus · <b>entrée</b> lookup · <b>c</b> comparateur · <b>esc</b> annuler · champ vide = ton IP</span>
+    <span class="fdesc"><b>indic</b> — recherche CTI perso : ASN, rDNS, RDAP, listes OSS et feeds publics agrégés en une fiche.</span>
+    <span class="fkeys"><b>/</b> recherche · <b>entrée</b> lookup · <b>e</b> extracteur · <b>c</b> comparer · <b>esc</b> fermer · champ vide = ton IP</span>
+    <span class="fwarn">Aucun signal ≠ inoffensif — les listes gratuites ne couvrent pas les proxys résidentiels.</span>
   </footer>
 </main>
 
@@ -185,28 +195,58 @@
 <div id="comparator" class="cmpOvl" hidden role="dialog" aria-modal="true" aria-labelledby="cmpTitle">
   <div class="cmpCard">
     <div class="cmpHead">
-      <h2 id="cmpTitle">Comparateur</h2>
+      <h2 id="cmpTitle">Comparer</h2>
+      <span class="cmpSubtitle" id="cmpSubtitle"></span>
       <button class="ovlx" id="cmpClose" aria-label="Fermer le comparateur" title="Fermer">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
     </div>
     <div class="cmpBody">
-      <div class="cmpInputs">
-        <div class="cmpField">
-          <label for="cmpA">Observable A</label>
-          <input id="cmpA" type="text" autocomplete="off" spellcheck="false" autocapitalize="off"
-                 placeholder="1.1.1.1 ou google.com…" aria-label="Premier observable à comparer" />
+      <div class="cmpSlots">
+        <div class="cmpSlot cmpSlot--subj">
+          <span class="cmpSlotLab">Sujet</span>
+          <div class="cmpSubject" id="cmpSubject"></div>
         </div>
-        <div class="cmpField">
-          <label for="cmpB">Observable B</label>
+        <div class="cmpSlot">
+          <label class="cmpSlotLab" for="cmpB">Comparer à</label>
           <input id="cmpB" type="text" autocomplete="off" spellcheck="false" autocapitalize="off"
-                 placeholder="8.8.8.8 ou cloudflare.com…" aria-label="Second observable à comparer" />
+                 placeholder="1.1.1.1, google.com…" aria-label="Observable à comparer" />
+        </div>
+        <div class="cmpSlot" id="cmpSlotC" hidden>
+          <label class="cmpSlotLab" for="cmpC">Et à</label>
+          <input id="cmpC" type="text" autocomplete="off" spellcheck="false" autocapitalize="off"
+                 placeholder="9.9.9.9, cloudflare.com…" aria-label="Troisième observable à comparer" />
+          <button class="cmpDrop" id="cmpDropC" type="button" aria-label="Retirer le troisième observable" title="Retirer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
         </div>
       </div>
-      <div class="cmpGo">
-        <button id="cmpGo">Comparer</button>
+      <div class="cmpActions">
+        <button class="ghost" id="cmpAdd" type="button">+ un 3ᵉ observable</button>
+        <button class="cmpRun" id="cmpGo" type="button">Comparer</button>
       </div>
       <div class="cmpResults" id="cmpResults" hidden></div>
+    </div>
+  </div>
+</div>
+
+<div id="extractor" class="ovl" hidden role="dialog" aria-modal="true" aria-labelledby="exTitle">
+  <div class="ovlcard ovlcard--ex">
+    <div class="ovlhead">
+      <h2 id="exTitle">Extracteur d'IOC</h2>
+      <button class="ovlx" id="exClose" aria-label="Fermer l'extracteur" title="Fermer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="ovlbody">
+      <p class="sethint">Collez un rapport, un mail de phishing ou des logs : indic en sort les observables analysables (IP, domaines, hashs, URLs, CVE…).</p>
+      <textarea id="exText" class="exta" rows="8" spellcheck="false"
+                placeholder="Collez le texte ici…" aria-label="Texte à analyser"></textarea>
+      <div class="exActions">
+        <span class="exHint" id="exHint">⌘/Ctrl + entrée pour extraire</span>
+        <button class="cmpRun" id="exGo" type="button">Extraire</button>
+      </div>
+      <div class="exOut" id="exOut" hidden></div>
     </div>
   </div>
 </div>

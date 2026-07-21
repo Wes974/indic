@@ -10,7 +10,7 @@ use axum::{
     routing::{get, post},
 };
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::enrich::{self, Ctx, Report};
 use crate::observable::Observable;
@@ -196,8 +196,14 @@ struct BulkQ {
 
 #[derive(Deserialize)]
 struct CompareQ {
-    a: String,
-    b: String,
+    /// Forme N-aire (comparateur web : le sujet + jusqu'à 2 autres observables).
+    #[serde(default)]
+    items: Vec<String>,
+    /// Forme historique à deux — toujours acceptée.
+    #[serde(default)]
+    a: Option<String>,
+    #[serde(default)]
+    b: Option<String>,
     token: Option<String>,
 }
 
@@ -720,29 +726,45 @@ fn client_ip(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-/// `POST /compare` — enrichit deux observables en parallèle, retourne les
-/// deux rapports complets côte à côte pour comparaison.
+/// Plafond du comparateur : au-delà, les colonnes deviennent illisibles et le
+/// coût en appels d'enrichers grimpe linéairement.
+const COMPARE_MAX: usize = 3;
+
+/// `POST /compare` — enrichit 2 à 3 observables en parallèle et retourne les
+/// rapports complets côte à côte. Accepte `{items:[…]}` (N-aire) ou `{a,b}`.
 async fn compare(
     State(ctx): State<SharedCtx>,
     headers: HeaderMap,
     Json(body): Json<CompareQ>,
 ) -> Response {
     let auth = authorized(&ctx, &headers, body.token.as_deref());
-    let (a, b) = tokio::join!(
-        async {
-            match Observable::detect(&body.a) {
-                Some(o) => Some(enrich::run(&body.a, &o, &ctx, auth).await),
-                None => None,
-            }
-        },
-        async {
-            match Observable::detect(&body.b) {
-                Some(o) => Some(enrich::run(&body.b, &o, &ctx, auth).await),
-                None => None,
-            }
-        },
-    );
-    Json(json!({ "a": a, "b": b })).into_response()
+    let mut queries: Vec<String> = if body.items.is_empty() {
+        [body.a, body.b].into_iter().flatten().collect()
+    } else {
+        body.items
+    };
+    queries.retain(|q| !q.trim().is_empty());
+    if queries.len() < 2 {
+        return bad_request("au moins deux observables sont requis");
+    }
+    queries.truncate(COMPARE_MAX);
+
+    let reports = futures::future::join_all(queries.iter().map(|q| async {
+        match Observable::detect(q) {
+            Some(o) => Some(enrich::run(q, &o, &ctx, auth).await),
+            None => None,
+        }
+    }))
+    .await;
+
+    let items: Vec<Value> = reports
+        .into_iter()
+        .map(|r| serde_json::to_value(r).unwrap_or(Value::Null))
+        .collect();
+    // `a`/`b` restent exposés pour les clients de la forme historique à deux.
+    let a = items.first().cloned().unwrap_or(Value::Null);
+    let b = items.get(1).cloned().unwrap_or(Value::Null);
+    Json(json!({ "items": items, "a": a, "b": b })).into_response()
 }
 
 /// `GET /chaos?delay=2000&error=502` — injecte un délai ou une erreur pour

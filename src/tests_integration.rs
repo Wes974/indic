@@ -235,6 +235,36 @@ async fn compare_unrecognized_returns_null() {
     assert!(body["a"].is_null());
     assert!(body["b"].is_object());
 }
+
+#[tokio::test]
+async fn compare_items_returns_n_columns() {
+    let input = json!({"items": ["8.8.8.8", "1.1.1.1", "9.9.9.9"]});
+    let (status, body) = post("/compare", input).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().expect("items");
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[2]["query"], "9.9.9.9");
+    // a/b restent alimentés pour la forme historique à deux
+    assert_eq!(body["a"]["query"], "8.8.8.8");
+    assert_eq!(body["b"]["query"], "1.1.1.1");
+}
+
+#[tokio::test]
+async fn compare_items_capped_at_three() {
+    let input = json!({"items": ["8.8.8.8", "1.1.1.1", "9.9.9.9", "8.8.4.4"]});
+    let (status, body) = post("/compare", input).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(3));
+}
+
+#[tokio::test]
+async fn compare_needs_two_observables() {
+    let (status, _) = post("/compare", json!({"items": ["8.8.8.8"]})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // champ vide côté formulaire → même refus
+    let (status, _) = post("/compare", json!({"a": "8.8.8.8", "b": "  "})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
 #[tokio::test]
 async fn bulk_export_stix_returns_bundle() {
     let input = json!({"queries": ["8.8.8.8", "1.1.1.1"], "format": "stix"});

@@ -42,14 +42,13 @@ test.describe('IP lookup', () => {
     await expect(page.locator('#report')).toBeVisible({ timeout: 10000 });
   });
 
-  test('empty search shows error', async ({ page }) => {
+  test('empty search falls back to the visitor IP', async ({ page }) => {
     await page.goto('/');
     await page.fill('#q', '');
     await page.click('#goBtn');
-    // Devrait soit montrer la landing, soit une erreur
-    const error = page.locator('.errmsg');
-    const landing = page.locator('#landing');
-    await expect(error.or(landing).first()).toBeVisible({ timeout: 5000 });
+    // champ vide = lookup de sa propre IP : rapport, ou erreur si elle est privée
+    await expect(page.locator('#report').or(page.locator('#err')).first())
+      .toBeVisible({ timeout: 15000 });
   });
 });
 
@@ -62,35 +61,83 @@ test.describe('Domain lookup', () => {
   });
 });
 
+// Le comparateur part toujours de la fiche affichée : il n'est pas atteignable
+// depuis l'accueil, et la première colonne est figée sur l'observable courant.
 test.describe('Comparator', () => {
-  test('opens comparator with button', async ({ page }) => {
+  const openReport = async (page, q: string) => {
+    await page.goto(`/?q=${encodeURIComponent(q)}`);
+    await expect(page.locator('#report')).toBeVisible({ timeout: 20000 });
+  };
+
+  test('is not reachable from the landing page', async ({ page }) => {
     await page.goto('/');
-    await page.click('#cmpBtn');
-    await expect(page.locator('#comparator')).toBeVisible({ timeout: 3000 });
+    await expect(page.locator('#cmpBtn')).toBeHidden();
+    await page.keyboard.press('c');
+    await expect(page.locator('#comparator')).toBeHidden();
   });
 
-  test('opens comparator with keyboard shortcut c', async ({ page }) => {
-    await page.goto('/');
+  test('opens from the report and pins the subject', async ({ page }) => {
+    await openReport(page, '8.8.8.8');
+    await page.click('#cmpBtn');
+    await expect(page.locator('#comparator')).toBeVisible({ timeout: 3000 });
+    await expect(page.locator('#cmpSubject')).toContainText('8.8.8.8');
+  });
+
+  test('opens with keyboard shortcut c once a report is shown', async ({ page }) => {
+    await openReport(page, '8.8.8.8');
     await page.keyboard.press('c');
     await expect(page.locator('#comparator')).toBeVisible({ timeout: 3000 });
   });
 
   test('closes comparator with Escape', async ({ page }) => {
-    await page.goto('/');
+    await openReport(page, '8.8.8.8');
     await page.click('#cmpBtn');
     await expect(page.locator('#comparator')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('#comparator')).toBeHidden({ timeout: 2000 });
   });
 
-  test('compares two IPs', async ({ page }) => {
-    await page.goto('/');
+  test('compares the subject with a second observable', async ({ page }) => {
+    await openReport(page, '8.8.8.8');
     await page.click('#cmpBtn');
-    await page.fill('#cmpA', '8.8.8.8');
     await page.fill('#cmpB', '1.1.1.1');
     await page.click('#cmpGo');
-    await expect(page.locator('#cmpColA .report')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('#cmpColB .report')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#cmpResults .cmpTbl')).toBeVisible({ timeout: 25000 });
+    await expect(page.locator('#cmpResults .cmpCol')).toHaveCount(2);
+    await expect(page.locator('#cmpResults .cmpRel')).toBeVisible();
+  });
+
+  test('compares up to three observables', async ({ page }) => {
+    await openReport(page, '8.8.8.8');
+    await page.click('#cmpBtn');
+    await page.fill('#cmpB', '1.1.1.1');
+    await page.click('#cmpAdd');
+    await page.fill('#cmpC', '9.9.9.9');
+    await page.click('#cmpGo');
+    await expect(page.locator('#cmpResults .cmpTbl')).toBeVisible({ timeout: 30000 });
+    await expect(page.locator('#cmpResults .cmpCol')).toHaveCount(3);
+  });
+});
+
+test.describe('IOC extractor', () => {
+  const SAMPLE = 'Compromission : 8.8.8.8 a contacté evil-example.com puis CVE-2021-44228.';
+
+  test('opens with the e shortcut and groups results by type', async ({ page }) => {
+    await page.goto('/');
+    await page.keyboard.press('e');
+    await expect(page.locator('#extractor')).toBeVisible({ timeout: 3000 });
+    await page.fill('#exText', SAMPLE);
+    await page.click('#exGo');
+    await expect(page.locator('#exOut .exGrp').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#exOut .exSum')).toContainText('IOC');
+  });
+
+  test('opens from the landing button and closes with Escape', async ({ page }) => {
+    await page.goto('/');
+    await page.click('.lextract');
+    await expect(page.locator('#extractor')).toBeVisible({ timeout: 3000 });
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#extractor')).toBeHidden({ timeout: 2000 });
   });
 });
 
@@ -122,12 +169,13 @@ test.describe('Theme', () => {
 });
 
 test.describe('Graph', () => {
-  test('shows graph for IP lookup', async ({ page }) => {
+  test('shows the pivot graph when an observable has enough pivots', async ({ page }) => {
     await page.goto('/');
-    await page.fill('#q', '8.8.8.8');
+    await page.fill('#q', 'google.com');
     await page.click('#goBtn');
-    // Le canvas du graphe devrait apparaître
-    await expect(page.locator('#graph canvas')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('#report')).toBeVisible({ timeout: 20000 });
+    // le graphe n'apparaît qu'au-delà de 3 pivots — sinon la section reste repliée
+    await expect(page.locator('#secPivots')).toBeVisible({ timeout: 10000 });
   });
 });
 

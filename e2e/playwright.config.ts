@@ -15,11 +15,11 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
   ],
   webServer: {
-    cwd: '..',
-    command: 'INDIC_BIND=127.0.0.1:8099 INDIC_DATA_DIR=../data cargo run -- serve',
+    command: 'INDIC_BIND=127.0.0.1:8099 INDIC_DATA_DIR=data cargo run -- serve',
     cwd: '..',
     port: 8099,
-    timeout: 120_000,
+    // premier démarrage = build + bootstrap des feeds (téléchargements)
+    timeout: 600_000,
     reuseExistingServer: !process.env.CI,
   },
 });

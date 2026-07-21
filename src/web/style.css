@@ -271,6 +271,9 @@ h1.obs {
   padding: 5px 10px; transition: color .15s, border-color .15s;
 }
 .ghost:hover { color: var(--accent); border-color: var(--accent-bd); }
+/* action principale de la fiche : comparer part toujours de l'observable affiché */
+.ghost--cmp { display: inline-flex; align-items: center; gap: 6px; color: var(--ink2); }
+.ghost--cmp svg { width: 13px; height: 13px; }
 
 /* ================= stat tiles ================= */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; margin-top: 20px; }
@@ -315,13 +318,11 @@ h1.obs {
 .lkinds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-basis: 100%; padding: 4px 0 0; }
 .lkinds .llbl { font: 400 10px/1 var(--sans); color: var(--ink3); text-transform: uppercase; letter-spacing: .08em; margin-right: 4px; }
 .lchip { font: 500 12px/1 var(--sans); padding: 3px 10px; border-radius: 12px; border: 1px solid transparent; white-space: nowrap; }
-/* IOC extractor */
-.iocex { margin-bottom: 20px; }
-.iocex textarea { width: 100%; box-sizing: border-box; background: var(--card); border: 1px solid var(--line2); border-radius: 10px; padding: 12px 14px; color: var(--ink); font: 400 13px/1.5 var(--sans); resize: vertical; }
-.iocex textarea:focus { border-color: var(--accent-bd); outline: none; }
-.iocex .ghost { margin-top: 8px; }
-.iocex .iocout { margin-top: 10px; gap: 6px; }
-.iocnone { font: 400 12px var(--sans); color: var(--ink3); }
+/* ligne d'intro : baseline commune entre le texte et l'entrée de l'extracteur */
+.lintrorow { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+#landing .lintrorow .lintro { margin: 0; }
+.lextract { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; }
+.lextract svg { width: 14px; height: 14px; }
 .lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; align-items: start; }
 .lcard { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: var(--shadow); min-width: 0; }
 .lhead { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -461,10 +462,16 @@ details.raw pre {
 }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
 footer {
-  display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap;
+  display: flex; justify-content: space-between; gap: 10px 24px; flex-wrap: wrap;
   margin-top: 52px; padding-top: 14px; border-top: 1px solid var(--line);
   font: 400 11.5px/1.6 var(--mono); color: var(--ink3);
 }
+.fdesc { flex: 1 1 340px; }
+.fdesc b { color: var(--ink2); font-weight: 650; }
+.fkeys { flex: none; }
+/* la limite des listes gratuites est une mise en garde : sa propre ligne, pas
+   une subordonnée noyée en fin de phrase */
+.fwarn { flex-basis: 100%; color: var(--h-amber); }
 
 /* ================= réglages (overlay) ================= */
 .ovl { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-start; justify-content: center;
@@ -516,78 +523,134 @@ footer {
 .keyitem.no .kname { color: var(--ink3); }
 .keyempty { font: 400 12px/1.5 var(--sans); color: var(--ink3); font-style: italic; }
 
-/* ================= comparateur (overlay) ================= */
+/* ================= comparateur & extracteur (overlays) ================= */
 .cmpOvl { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-start; justify-content: center;
   padding: 5vh 16px 24px; background: rgba(4,7,11,.55); overflow-y: auto; }
 .cmpOvl[hidden] { display: none; }
 @supports (backdrop-filter: blur(3px)) { .cmpOvl { backdrop-filter: blur(3px); } }
 .cmpCard { width: 100%; max-width: 1020px; background: var(--card); border: 1px solid var(--line2);
   border-radius: 12px; box-shadow: var(--shadow-pop, 0 6px 20px rgba(0,0,0,.4)); display: flex; flex-direction: column; }
-.cmpHead { display: flex; align-items: center; gap: 12px; padding: 13px 16px 13px 18px; border-bottom: 1px solid var(--line); }
-.cmpHead h2 { margin: 0; flex: 1; font: 650 14px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--ink); }
+.cmpHead { display: flex; align-items: baseline; gap: 10px; padding: 13px 16px 13px 18px; border-bottom: 1px solid var(--line); }
+.cmpHead h2 { margin: 0; font: 650 14px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--ink); }
+.cmpSubtitle { flex: 1; min-width: 0; font: 400 11.5px/1 var(--mono); color: var(--ink3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmpHead .ovlx { align-self: center; }
 .cmpBody { padding: 16px 18px 20px; }
-.cmpInputs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
-.cmpField { display: flex; flex-direction: column; gap: 5px; }
-.cmpField label { font: 600 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
-.cmpField input { width: 100%; background: var(--card2); color: var(--ink); border: 1px solid var(--line2);
-  border-radius: 8px; padding: 9px 12px; font: 400 13.5px/1.4 var(--mono); }
-.cmpField input:focus { outline: none; border-color: var(--accent-bd); box-shadow: 0 0 0 3px var(--accent-bg); }
-.cmpField input::placeholder { color: var(--ink3); }
-.cmpGo { display: flex; justify-content: center; margin-top: 14px; }
-.cmpGo button {
-  cursor: pointer; background: var(--accent-bg); color: var(--accent);
-  border: 1px solid var(--accent-bd); border-radius: 8px;
-  padding: 10px 32px; font: 650 12.5px/1 var(--mono); letter-spacing: .06em;
-  transition: background .15s, opacity .15s;
+
+/* ── saisie : le sujet est figé (c'est la fiche ouverte), les autres sont libres ── */
+.cmpSlots { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.cmpSlot { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 5px; position: relative; }
+.cmpSlot[hidden] { display: none; }
+.cmpSlotLab { font: 600 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
+.cmpSlot input { width: 100%; box-sizing: border-box; background: var(--card2); color: var(--ink);
+  border: 1px solid var(--line2); border-radius: 8px; padding: 9px 12px; font: 400 13px/1.4 var(--mono); }
+.cmpSlot input:focus { outline: none; border-color: var(--accent-bd); box-shadow: 0 0 0 3px var(--accent-bg); }
+.cmpSlot input::placeholder { color: var(--ink3); }
+.cmpSubject { display: flex; align-items: center; gap: 8px; min-width: 0; box-sizing: border-box;
+  background: var(--accent-bg); border: 1px solid var(--accent-bd); border-radius: 8px; padding: 9px 12px; }
+.cmpSubject .kdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.cmpSubjV { font: 500 13px/1.4 var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmpDrop { position: absolute; right: 6px; bottom: 7px; display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; cursor: pointer; background: none; border: 0; border-radius: 6px; color: var(--ink3); }
+.cmpDrop:hover { color: var(--h-red); background: var(--hbg-red); }
+.cmpDrop svg { width: 13px; height: 13px; }
+#cmpSlotC input { padding-right: 34px; }
+.cmpActions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+.cmpActions #cmpAdd[hidden] { display: none; }
+.cmpRun {
+  cursor: pointer; background: var(--accent-bg); border: 1px solid var(--accent-bd); border-radius: 8px;
+  color: var(--accent); font: 600 12.5px/1 var(--mono); letter-spacing: .04em; padding: 10px 22px;
+  transition: background .15s, color .15s;
 }
-.cmpGo button:hover { background: var(--accent-bd); }
-.cmpGo button:disabled { opacity: .5; cursor: default; }
+.cmpRun:hover { background: var(--accent-bd); color: var(--ink); }
+.cmpRun:disabled { opacity: .5; cursor: default; }
+.cmpActions .cmpRun { margin-left: auto; }
+
 .cmpResults { display: flex; flex-direction: column; gap: 14px; margin-top: 20px; }
 .cmpLoading { font: 400 12.5px/1.5 var(--sans); color: var(--ink3); font-style: italic; text-align: center; padding: 22px; }
-.cmpResults > .cmpErr { font: 400 12.5px/1.5 var(--mono); color: var(--h-red); text-align: center; padding: 16px; }
-/* en-tête : les deux observables + leur verdict */
-.cmpTop { display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; align-items: start; }
-.cmpTopCol { min-width: 0; }
-.cmpQ { font: 650 13px/1.25 var(--mono); color: var(--ink); word-break: break-all; margin-bottom: 8px; }
-.cmpVs { align-self: center; font: 400 18px/1 var(--mono); color: var(--ink3); }
-.cmpErr { font: 400 12px/1.5 var(--mono); color: var(--h-red); }
-/* bandeau relation */
-.cmpRel { border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; background: var(--card2); }
-.cmpRel.linked { border-color: var(--h-amber); }
-.cmpRelHead { display: flex; align-items: center; gap: 9px; }
-.cmpRelIco { font-size: 15px; line-height: 1; flex: none; }
-.cmpRelTxt { font: 650 12px/1.25 var(--mono); letter-spacing: .03em; color: var(--ink); }
-.cmpRel.indep .cmpRelTxt { color: var(--ink2); }
-.cmpShared { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-/* tableau aligné A | B */
-.cmpTbl { display: flex; flex-direction: column; background: var(--card2); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-.cmpRow { display: grid; grid-template-columns: 92px 1fr 26px 1fr; align-items: center; gap: 8px; padding: 8px 13px; border-top: 1px solid var(--line); }
+.cmpErr { font: 400 12.5px/1.5 var(--mono); color: var(--h-red); text-align: center; padding: 14px; }
+
+/* ── tableau : en-têtes et valeurs partagent la même grille (--cn colonnes) ── */
+.cmpTbl { --cn: 2; display: flex; flex-direction: column; background: var(--card2);
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.cmpRow { display: grid; grid-template-columns: 94px repeat(var(--cn), minmax(0, 1fr));
+  align-items: center; gap: 10px; padding: 8px 13px; border-top: 1px solid var(--line); }
 .cmpRow:first-child { border-top: none; }
-.cmpHdr { background: var(--card); }
-.cmpHdr .cmpVa, .cmpHdr .cmpVb { font: 650 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
+.cmpHdr { background: var(--card); align-items: stretch; padding: 12px 13px; }
 .cmpK { font: 600 10.5px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink3); }
-.cmpVa, .cmpVb { font: 400 12.5px/1.3 var(--mono); color: var(--ink2); min-width: 0; word-break: break-word; }
-.cmpVa.d, .cmpVb.d { color: var(--ink); }
-.cmpMk { font: 700 12px/1 var(--mono); text-align: center; color: var(--ink3); }
-.cmpMk.eq { color: var(--h-green); }
-.cmpMk.ne { color: var(--h-amber); }
-/* diff des signaux */
+/* diff-first : seules les lignes divergentes sont marquées, l'identique s'efface */
+.cmpRow.ne { box-shadow: inset 2px 0 0 var(--h-amber); }
+.cmpVal { font: 400 12.5px/1.35 var(--mono); color: var(--ink3); min-width: 0; word-break: break-word; }
+.cmpVal.d { color: var(--ink); }
+.cmpVal.nil { color: var(--ink3); opacity: .55; }
+.cmpCol { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; min-width: 0; }
+.cmpColTop { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
+.cmpColTop .kdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.cmpColV { font: 650 12.5px/1.25 var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmpBadge { font: 600 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--accent); background: var(--accent-bg); border: 1px solid var(--accent-bd);
+  border-radius: 4px; padding: 3px 6px; }
+.cmpColErr { font: 400 11px/1.3 var(--mono); color: var(--h-red); }
+/* couleurs posées en JS (var(--h-…)/--hbg/--hbd) : évite la course de spécificité
+   avec les classes .c-<teinte> déclarées plus haut dans la feuille */
+.cmpVerd { display: inline-flex; align-items: center; gap: 6px; font: 500 11.5px/1 var(--mono);
+  border-radius: 12px; padding: 4px 9px; border: 1px solid var(--line2); }
+.cmpVerd .cdot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
+
+/* ── relation : une ligne par paire ── */
+.cmpRel { border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; background: var(--card2); }
+.cmpRel.linked { border-color: var(--hbd-amber); }
+.cmpRelLines { display: flex; flex-direction: column; gap: 7px; }
+.cmpRelLine { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.cmpRelIco { font-size: 13px; line-height: 1; flex: none; }
+.cmpRelPair { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.cmpRelPair b { font: 650 11.5px/1.25 var(--mono); color: var(--ink); font-weight: 650; }
+.cmpRelVs { font: 400 13px/1 var(--mono); color: var(--ink3); }
+.cmpRelTxt { font: 400 11.5px/1.3 var(--mono); color: var(--ink2); }
+.cmpRelLine.indep .cmpRelTxt { color: var(--ink3); }
+.cmpShared { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 11px;
+  padding-top: 10px; border-top: 1px solid var(--line); }
+.cmpSharedT { font: 600 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); margin-right: 3px; }
+
+/* ── diff des signaux ── */
 .cmpSigDiff { display: flex; flex-direction: column; gap: 11px; }
 .cmpSigGrp { display: flex; flex-direction: column; gap: 6px; }
 .cmpSigT { font: 600 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
 .cmpSigGrp.gCommon .cmpSigT { color: var(--h-green); }
 .cmpSigW { display: flex; flex-wrap: wrap; gap: 5px; }
 .cmpSigW .chip { font-size: 11px; padding: 2px 8px; }
+
+/* ── extracteur d'IOC ── */
+.ovlcard--ex { max-width: 720px; }
+.exta { width: 100%; box-sizing: border-box; background: var(--card2); border: 1px solid var(--line2);
+  border-radius: 10px; padding: 12px 14px; color: var(--ink); font: 400 12.5px/1.6 var(--mono); resize: vertical; }
+.exta:focus { outline: none; border-color: var(--accent-bd); box-shadow: 0 0 0 3px var(--accent-bg); }
+.exta::placeholder { color: var(--ink3); }
+.exActions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.exHint { font: 400 11px/1.3 var(--mono); color: var(--ink3); }
+.exOut { display: flex; flex-direction: column; gap: 14px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.exOut[hidden] { display: none; }
+.exSum { font: 400 12px/1.4 var(--mono); color: var(--ink3); }
+.exSum b { color: var(--ink); font-weight: 650; }
+.exNone { font: 400 12.5px/1.5 var(--sans); color: var(--ink3); font-style: italic; }
+.exGrp { display: flex; flex-direction: column; gap: 7px; }
+.exGrpT { display: flex; align-items: center; gap: 7px; }
+.exGrpT .kdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.exGrpN { font: 600 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); }
+.exN { font: 400 10.5px/1 var(--mono); color: var(--ink3); }
+.exW { gap: 6px; }
+
 @media (max-width: 760px) {
-  .cmpInputs { grid-template-columns: 1fr; }
   .cmpCard { max-width: 100%; }
+  .cmpSlot { flex-basis: 100%; }
 }
 @media (max-width: 640px) {
   .cmpOvl { padding: 2vh 10px 16px; }
   .cmpBody { padding: 12px; }
-  .cmpTop { grid-template-columns: 1fr; }
-  .cmpVs { display: none; }
-  .cmpRow { grid-template-columns: 74px 1fr 22px 1fr; padding: 7px 10px; }
+  /* colonnes empilées : la grille tient trop mal sous 3 colonnes sur mobile */
+  .cmpRow { grid-template-columns: 78px repeat(var(--cn), minmax(0, 1fr)); gap: 7px; padding: 7px 10px; }
+  .cmpVal, .cmpColV { font-size: 11.5px; }
+  .cmpBadge { display: none; }
 }
 
 /* ================= responsive / a11y ================= */

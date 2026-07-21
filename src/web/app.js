@@ -17,6 +17,36 @@ function trunc(s, n) {
   const head = Math.ceil((n - 1) * 0.6);
   return s.slice(0, head) + "…" + s.slice(-(n - 1 - head));
 }
+/* icône inline : createElement ne fonctionne pas pour SVG (namespace requis) */
+function svgIcon(paths) {
+  const NS = "http://www.w3.org/2000/svg";
+  const s = document.createElementNS(NS, "svg");
+  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor",
+                                        "stroke-width": "1.8", "aria-hidden": "true" })) s.setAttribute(k, v);
+  for (const d of paths) {
+    const p = document.createElementNS(NS, "path");
+    p.setAttribute("d", d);
+    s.append(p);
+  }
+  return s;
+}
+const iconExtract = () => svgIcon([
+  "M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21H15",
+  "M8.5 8h5M8.5 12h3",
+  "M20.9 15.5a3.4 3.4 0 1 1-6.8 0 3.4 3.4 0 0 1 6.8 0m-.7 2.7 2 2",
+]);
+/* piège à focus : Tab cycle dans l'overlay tant qu'il est ouvert */
+function trapFocus(node) {
+  node.addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    const f = [...node.querySelectorAll('button, input, textarea, [href], [tabindex]:not([tabindex="-1"])')]
+      .filter((x) => !x.disabled && x.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+}
 
 /* ---------- token premium : capturé une fois depuis ?token=…, puis retiré de l'URL ---------- */
 (() => {
@@ -799,15 +829,14 @@ function buildLanding(root) {
   root.replaceChildren();
   const stats = el("div", "lstats"); stats.id = "landingStats"; stats.hidden = true;
   root.append(stats);
-  // Widget extraction d'IOC
-  const iocWrap = el("div", "iocex"); iocWrap.id = "iocExtract";
-  iocWrap.append(
-    el("textarea", "iocta", null, {placeholder: "Collez un rapport d'incident, des logs… les IOC seront extraits.", rows: 3}),
-    el("button", "ghost", "Extraire les IOC"),
-    el("div", "chips iocout")
-  );
-  root.append(iocWrap);
-  root.append(el("p", "lintro", "Analysez n'importe quel observable, ou partez d'un exemple :"));
+  // L'extracteur vit dans son propre overlay : ici on n'expose que l'entrée.
+  const intro = el("div", "lintrorow");
+  intro.append(el("p", "lintro", "Analysez n'importe quel observable, ou partez d'un exemple :"));
+  const exBtn = el("button", "ghost lextract");
+  exBtn.append(iconExtract(), el("span", null, "Extraire les IOC d'un texte"));
+  exBtn.onclick = openExtractor;
+  intro.append(exBtn);
+  root.append(intro);
   const grid = el("div", "lgrid");
   for (const cat of LANDING) {
     const card = el("div", "lcard");
@@ -861,34 +890,6 @@ function showLanding() {
     }
     s.hidden = false;
   }).catch(() => {});
-  // Widget extraction d'IOC depuis un texte
-  const iocWrap = $("iocExtract");
-  if (iocWrap && !iocWrap.dataset.init) {
-    iocWrap.dataset.init = "1";
-    const ta = iocWrap.querySelector("textarea");
-    const btn = iocWrap.querySelector("button");
-    const out = iocWrap.querySelector(".iocout");
-    btn.onclick = async () => {
-      const txt = ta.value.trim();
-      if (!txt) return;
-      btn.disabled = true; btn.textContent = "…";
-      try {
-        const r = await fetch("/extract", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: txt}) });
-        const d = await r.json();
-        out.replaceChildren();
-        if (!d.iocs?.length) { out.append(el("span", "iocnone", "Aucun IOC détecté")); return; }
-        for (const ioc of d.iocs) {
-          const chip = el("button", "chip pchip lchip");
-          chip.style.color = `var(--h-${kindHue(ioc.type)})`;
-          chip.textContent = trunc(ioc.value, 36);
-          chip.title = ioc.value;
-          chip.onclick = () => go(ioc.value);
-          out.append(chip);
-        }
-      } catch { out.replaceChildren(el("span", "iocnone", "Erreur")); }
-      finally { btn.disabled = false; btn.textContent = "Extraire"; }
-    };
-  }
 }
 
 /* ---------- rendu global ---------- */
@@ -899,7 +900,10 @@ function render(data, info) {
   $("err").hidden = true;
   $("skeleton").hidden = true;
   $("landing").hidden = true;
-  $("landingStats").hidden = true;
+  // La landing est construite paresseusement : avec ?q=… au chargement elle ne
+  // l'a jamais été, et #landingStats n'existe pas encore.
+  const lstats = $("landingStats");
+  if (lstats) lstats.hidden = true;
 
   const rep = $("report");
   rep.hidden = false;
@@ -1060,13 +1064,18 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (!$("settings").hidden) { e.preventDefault(); closeSettings(); return; }
     if (!$("comparator").hidden) { e.preventDefault(); closeComparator(); return; }
+    if (!$("extractor").hidden) { e.preventDefault(); closeExtractor(); return; }
   }
-  if (e.key === "/" && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
+  const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "");
+  if (e.key === "/" && !typing) {
     e.preventDefault(); $("q").focus(); $("q").select();
   }
-  // Raccourci comparateur
-  if (e.key === "c" && !e.metaKey && !e.ctrlKey && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
+  // Raccourcis : c = comparer la fiche courante, e = extracteur d'IOC
+  if (e.key === "c" && !e.metaKey && !e.ctrlKey && !typing) {
     e.preventDefault(); openComparator();
+  }
+  if (e.key === "e" && !e.metaKey && !e.ctrlKey && !typing) {
+    e.preventDefault(); openExtractor();
   }
   // Raccourcis filtres signaux : 1=Tous, 2=Critiques, 3=Suspects, 4=Autres
   if (/^[1-4]$/.test(e.key) && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
@@ -1211,166 +1220,310 @@ $("setSave").onclick = () => {
   loadSettings();
 };
 $("setToken").addEventListener("keydown", (e) => { if (e.key === "Enter") $("setSave").click(); });
-/* focus trap léger : Tab cycle dans l'overlay */
-$("settings").addEventListener("keydown", (e) => {
-  if (e.key !== "Tab") return;
-  const f = [...$("settings").querySelectorAll('button, input, [href], [tabindex]:not([tabindex="-1"])')]
-    .filter((x) => !x.disabled && x.offsetParent !== null);
-  if (!f.length) return;
-  const first = f[0], last = f[f.length - 1];
-  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-});
+trapFocus($("settings"));
 
-/* ---------- comparateur ---------- */
+/* ---------- extracteur d'IOC (overlay) ---------- */
+let EX_RETURN = null;
+function openExtractor() {
+  EX_RETURN = document.activeElement;
+  $("extractor").hidden = false;
+  requestAnimationFrame(() => $("exText").focus());
+}
+function closeExtractor() {
+  $("extractor").hidden = true;
+  if (EX_RETURN && EX_RETURN.focus) EX_RETURN.focus();
+  else $("extractBtn").focus();
+}
+/* Résultats groupés par type : un rapport colle souvent 40 IOC dont 30 domaines,
+   la liste à plat était illisible. */
+function renderExtract(out, iocs) {
+  out.replaceChildren();
+  if (!iocs.length) {
+    out.append(el("div", "exNone", "Aucun IOC détecté dans ce texte."));
+    return;
+  }
+  const byType = new Map();
+  for (const i of iocs) {
+    if (!byType.has(i.type)) byType.set(i.type, []);
+    byType.get(i.type).push(i.value);
+  }
+  const types = [...byType.keys()].sort((a, b) => byType.get(b).length - byType.get(a).length);
+  const s = el("div", "exSum");
+  s.append(el("b", null, String(iocs.length)),
+           el("span", null, ` IOC · ${types.length} type${types.length > 1 ? "s" : ""} · cliquez pour analyser`));
+  out.append(s);
+  for (const t of types) {
+    const g = el("div", "exGrp");
+    const h = el("div", "exGrpT");
+    const dot = el("i", "kdot"); dot.style.background = `var(--h-${kindHue(t)})`;
+    h.append(dot, el("span", "exGrpN", t), el("span", "exN", String(byType.get(t).length)));
+    const w = el("div", "chips exW");
+    for (const v of byType.get(t)) {
+      const c = el("button", "chip pchip");
+      c.append(el("span", "ctxt", trunc(v, 42)));
+      c.title = `Analyser ${v}`;
+      c.onclick = () => { closeExtractor(); go(v); };
+      w.append(c);
+    }
+    g.append(h, w);
+    out.append(g);
+  }
+}
+async function doExtract() {
+  const txt = $("exText").value.trim();
+  const out = $("exOut"), btn = $("exGo");
+  if (!txt) { toast("Collez d'abord un texte"); $("exText").focus(); return; }
+  btn.disabled = true; btn.textContent = "…";
+  out.hidden = false;
+  out.replaceChildren(el("div", "cmpLoading", "Extraction…"));
+  try {
+    const r = await fetch("/extract", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: txt }),
+    });
+    const d = await r.json();
+    renderExtract(out, d.iocs || []);
+  } catch {
+    out.replaceChildren(el("div", "cmpErr", "Erreur réseau"));
+  } finally {
+    btn.disabled = false; btn.textContent = "Extraire";
+  }
+}
+$("extractBtn").onclick = openExtractor;
+$("exClose").onclick = closeExtractor;
+$("exGo").onclick = doExtract;
+$("extractor").addEventListener("click", (e) => { if (e.target === $("extractor")) closeExtractor(); });
+$("exText").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); doExtract(); }
+});
+trapFocus($("extractor"));
+
+/* ---------- comparateur : la fiche courante face à 1 ou 2 autres observables ----------
+   Le comparateur part toujours du rapport affiché (le « sujet ») : comparer deux
+   inconnus depuis l'accueil n'avait pas de sens et laissait un formulaire vide
+   au milieu de la page. */
 let CMP_RETURN = null;
+const CMP_MAX_EXTRA = 2;
+function cmpReady() { return !!(CUR && CUR.query); }
+function addSlotC() {
+  $("cmpSlotC").hidden = false;
+  $("cmpAdd").hidden = true;
+  requestAnimationFrame(() => $("cmpC").focus());
+}
+function dropSlotC() {
+  $("cmpSlotC").hidden = true;
+  $("cmpC").value = "";
+  $("cmpAdd").hidden = false;
+}
 function openComparator() {
+  if (!cmpReady()) {
+    toast("Lancez d'abord un lookup : la comparaison part de la fiche affichée");
+    $("q").focus();
+    return;
+  }
   CMP_RETURN = document.activeElement;
-  $("comparator").hidden = false;
-  $("cmpA").value = "";
+  const box = $("cmpSubject");
+  box.replaceChildren();
+  const dot = el("i", "kdot"); dot.style.background = `var(--h-${kindHue(CUR.kind)})`;
+  box.append(dot, el("span", "cmpSubjV", trunc(CUR.query, 30)));
+  box.title = CUR.query;
+  $("cmpSubtitle").textContent = CUR.kind ? `sujet · ${CUR.kind}` : "";
+  dropSlotC();
   $("cmpB").value = "";
-  $("cmpResults").hidden = true;
-  requestAnimationFrame(() => $("cmpA").focus());
+  const res = $("cmpResults"); res.hidden = true; res.replaceChildren();
+  $("comparator").hidden = false;
+  requestAnimationFrame(() => $("cmpB").focus());
 }
 function closeComparator() {
   $("comparator").hidden = true;
   if (CMP_RETURN && CMP_RETURN.focus) CMP_RETURN.focus();
   else $("cmpBtn").focus();
 }
+
 /* ---------- comparateur : rendu diff-first ---------- */
 function cmpAttrs(d) {
-  const a = { kind: d.kind || "\u2014", country: null, asn: null, org: null,
-              verdict: null, sources: (d.enrichments || []).length };
-  if (d.ip) {
-    a.country = d.ip.country || null;
-    a.asn = d.ip.asn ? "AS" + d.ip.asn : null;
-    a.org = d.ip.org || d.ip.as_name || null;
+  const a = { kind: d.kind || null, country: null, asn: null, org: null, infra: null,
+              anon: null, verdict: null, sources: String((d.enrichments || []).length) };
+  const ip = d.ip;
+  if (ip) {
+    a.country = ip.country ? ip.country.toUpperCase() : null;
+    a.asn = ip.asn ? "AS" + ip.asn : null;
+    a.org = ip.org || ip.as_name || null;
+    a.infra = INFRA_LABEL[ip.infra_type] || ip.infra_type || null;
+    if (ip.anonymous) a.anon = ANON_LABEL[ip.anon_type] || ip.anon_type || "Oui";
+    else if (ip.anonymous === false) a.anon = "Non";
   }
   if (d.verdict) a.verdict = VERDICT_META[d.verdict.label]?.label || d.verdict.label;
   return a;
 }
-function cmpRow(k, a, b, same) {
-  const r = el("div", "cmpRow");
-  const va = el("div", "cmpVa", a ?? "\u2014");
-  const vb = el("div", "cmpVb", b ?? "\u2014");
-  const mk = el("div", "cmpMk");
-  if (a != null && b != null) {
-    const eq = same != null ? same : String(a) === String(b);
-    mk.classList.add(eq ? "eq" : "ne");
-    mk.textContent = eq ? "=" : "\u2260";
-    if (!eq) { va.classList.add("d"); vb.classList.add("d"); }
+const CMP_ROWS = [
+  ["Type", "kind"], ["Pays", "country"], ["ASN", "asn"], ["Org", "org"],
+  ["Infra", "infra"], ["Anonymat", "anon"], ["Verdict", "verdict"], ["Sources", "sources"],
+];
+/* Une ligne du tableau. Diff-first : seules les lignes qui divergent sont
+   marquées (rail ambre + valeurs en pleine encre) ; l'identique s'efface. */
+function cmpRow(label, values) {
+  const vals = values.map((v) => (v == null || v === "" ? null : String(v)));
+  const eq = vals.every((v) => v != null && v === vals[0]);
+  const r = el("div", "cmpRow " + (eq ? "eq" : "ne"));
+  r.append(el("div", "cmpK", label));
+  for (const v of vals) {
+    const c = el("div", "cmpVal" + (eq ? "" : " d") + (v == null ? " nil" : ""), v ?? "—");
+    c.title = v ?? "absent";
+    r.append(c);
   }
-  r.append(el("div", "cmpK", k), va, mk, vb);
   return r;
 }
-/* une entr\u00e9e par cat\u00e9gorie de signal (d\u00e9dup pour le diff communs/propres) */
+function cmpCol(label, d, isSubject) {
+  const c = el("div", "cmpCol" + (isSubject ? " subj" : ""));
+  const top = el("div", "cmpColTop");
+  const dot = el("i", "kdot"); dot.style.background = `var(--h-${kindHue(d && d.kind)})`;
+  top.append(dot, el("span", "cmpColV", trunc(label, 24)));
+  // le badge reste sur la ligne du titre : sinon la pastille de verdict de la
+  // colonne sujet décroche d'un cran par rapport aux autres colonnes
+  if (isSubject) top.append(el("span", "cmpBadge", "sujet"));
+  c.append(top);
+  c.title = label;
+  if (!d) { c.append(el("span", "cmpColErr", "non reconnu")); return c; }
+  if (d.verdict) {
+    const m = VERDICT_META[d.verdict.label] || { hue: "slate", label: d.verdict.label };
+    const p = el("span", "cmpVerd");
+    p.style.color = `var(--h-${m.hue})`;
+    p.style.background = `var(--hbg-${m.hue})`;
+    p.style.borderColor = `var(--hbd-${m.hue})`;
+    p.append(el("i", "cdot"), el("span", null, m.label));
+    c.append(p);
+  }
+  return c;
+}
+/* une entrée par catégorie de signal (dédup pour le diff communs/propres) */
 function sigCats(d) {
   const m = new Map();
   collectSignals(d).forEach((s) => { if (!m.has(s.category)) m.set(s.category, s); });
   return m;
 }
-function cmpHeadCol(lab, d, ok) {
-  const c = el("div", "cmpTopCol");
-  c.append(el("div", "cmpQ", trunc(lab, 30)));
-  if (ok && d.verdict) c.append(verdictBanner(d.verdict));
-  else if (!ok) c.append(el("div", "cmpErr", (d && d.error) || "aucune donn\u00e9e"));
-  return c;
-}
-function renderComparison(box, la, lb, A, B) {
-  box.replaceChildren();
-  const okA = !!(A && !A.error), okB = !!(B && !B.error);
-
-  const head = el("div", "cmpTop");
-  head.append(cmpHeadCol(la, A, okA), el("div", "cmpVs", "\u21c4"), cmpHeadCol(lb, B, okB));
-  box.append(head);
-  if (!okA || !okB) return; // un c\u00f4t\u00e9 a \u00e9chou\u00e9 \u2192 pas de diff possible
-
-  // \u2500\u2500 relation : pivots communs + lien direct A\u2194B \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-  const pa = collectPivots(A), pb = collectPivots(B);
-  const key = (p) => `${p.kind}|${p.value}`;
-  const setB = new Set(pb.map(key));
-  const shared = pa.filter((p) => setB.has(key(p)));
-  const direct = pa.some((p) => p.value === B.query) || pb.some((p) => p.value === A.query);
-  const linked = shared.length > 0 || direct;
-
-  const rel = el("div", "cmpRel " + (linked ? "linked" : "indep"));
-  const nShared = shared.length;
-  const plural = nShared > 1 ? "s" : "";
-  let txt;
-  if (direct) txt = "Li\u00e9s \u2014 lien direct" + (nShared ? ` + ${nShared} pivot${plural} commun${plural}` : "");
-  else if (nShared) txt = `Li\u00e9s \u2014 ${nShared} pivot${plural} commun${plural}`;
-  else txt = "Ind\u00e9pendants \u2014 aucun pivot commun";
-  const rh = el("div", "cmpRelHead");
-  rh.append(el("span", "cmpRelIco", linked ? "\ud83d\udd17" : "\u2298"), el("span", "cmpRelTxt", txt));
-  rel.append(rh);
-  if (nShared) {
+/* Relation : une ligne par paire (3 colonnes = 3 paires), + les pivots partagés
+   par TOUTES les colonnes, cliquables. */
+function cmpRelation(labels, reports) {
+  const keyOf = (p) => `${p.kind}|${p.value}`;
+  const piv = reports.map((r) => (r ? collectPivots(r) : []));
+  const sets = piv.map((ps) => new Set(ps.map(keyOf)));
+  const lines = el("div", "cmpRelLines");
+  let anyLink = false;
+  for (let i = 0; i < reports.length; i++) {
+    for (let j = i + 1; j < reports.length; j++) {
+      if (!reports[i] || !reports[j]) continue;
+      const shared = [...sets[i]].filter((k) => sets[j].has(k)).length;
+      const direct = piv[i].some((p) => p.value === reports[j].query)
+                  || piv[j].some((p) => p.value === reports[i].query);
+      const linked = shared > 0 || direct;
+      if (linked) anyLink = true;
+      const pl = shared > 1 ? "s" : "";
+      let txt;
+      if (direct) txt = "lien direct" + (shared ? ` + ${shared} pivot${pl} commun${pl}` : "");
+      else if (shared) txt = `${shared} pivot${pl} commun${pl}`;
+      else txt = "aucun pivot commun";
+      const ln = el("div", "cmpRelLine " + (linked ? "linked" : "indep"));
+      ln.append(el("span", "cmpRelIco", linked ? "🔗" : "⊘"));
+      const pair = el("span", "cmpRelPair");
+      pair.append(el("b", null, trunc(labels[i], 16)), el("span", "cmpRelVs", "⇄"),
+                  el("b", null, trunc(labels[j], 16)));
+      ln.append(pair, el("span", "cmpRelTxt", txt));
+      lines.append(ln);
+    }
+  }
+  const wrap = el("div", "cmpRel " + (anyLink ? "linked" : "indep"));
+  wrap.append(lines);
+  const common = piv[0].filter((p) => sets.every((s) => s.has(keyOf(p))));
+  if (common.length) {
     const sw = el("div", "cmpShared");
-    shared.slice(0, 8).forEach((p) => {
+    sw.append(el("span", "cmpSharedT", reports.length > 2 ? "Communs aux 3" : "Pivots communs"));
+    common.slice(0, 8).forEach((p) => {
       const b = el("button", "chip pchip");
       const dot = el("i", "kdot"); dot.style.background = `var(--h-${kindHue(p.kind)})`;
-      b.append(dot, el("span", "ctxt", trunc(p.value, 32)));
-      b.title = `${p.kind} \u00b7 ${p.value}`;
+      b.append(dot, el("span", "ctxt", trunc(p.value, 30)));
+      b.title = `${p.kind} · ${p.value}`;
       b.onclick = () => { closeComparator(); go(p.value); };
       sw.append(b);
     });
-    if (nShared > 8) sw.append(el("span", "chip", `+ ${nShared - 8}`));
-    rel.append(sw);
+    if (common.length > 8) sw.append(el("span", "chip", `+ ${common.length - 8}`));
+    wrap.append(sw);
   }
-  box.append(rel);
-
-  // \u2500\u2500 tableau align\u00e9 A | B \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-  const at = cmpAttrs(A), bt = cmpAttrs(B);
+  return wrap;
+}
+function cmpSignals(labels, reports) {
+  const cats = reports.map((r) => (r ? sigCats(r) : new Map()));
+  const all = new Set(cats.flatMap((m) => [...m.keys()]));
+  const sd = el("div", "cmpSigDiff");
+  const grp = (title, keys, src, cls) => {
+    if (!keys.length) return;
+    const g = el("div", "cmpSigGrp " + cls);
+    g.append(el("div", "cmpSigT", title));
+    const w = el("div", "cmpSigW");
+    keys.forEach((k) => w.append(sigChip(src.get(k), false)));
+    g.append(w);
+    sd.append(g);
+  };
+  grp("Communs", [...all].filter((k) => cats.every((m) => m.has(k))), cats[0], "gCommon");
+  cats.forEach((m, i) => {
+    const only = [...m.keys()].filter((k) => cats.every((o, j) => j === i || !o.has(k)));
+    grp("Propres à " + trunc(labels[i], 18), only, m, "gOnly");
+  });
+  return sd.children.length ? sd : null;
+}
+function renderComparison(box, labels, reports) {
+  box.replaceChildren();
+  const atts = reports.map((r) => (r ? cmpAttrs(r) : {}));
   const tbl = el("div", "cmpTbl");
+  tbl.style.setProperty("--cn", String(reports.length));
   const hdr = el("div", "cmpRow cmpHdr");
-  hdr.append(el("div", "cmpK", ""), el("div", "cmpVa", "A"), el("div", "cmpMk", ""), el("div", "cmpVb", "B"));
-  tbl.append(hdr, cmpRow("Type", at.kind, bt.kind));
-  if (at.country || bt.country) tbl.append(cmpRow("Pays", at.country, bt.country));
-  if (at.asn || bt.asn) tbl.append(cmpRow("ASN", at.asn, bt.asn));
-  if (at.org || bt.org) tbl.append(cmpRow("Org", at.org ? trunc(at.org, 22) : null, bt.org ? trunc(bt.org, 22) : null, (at.org || "") === (bt.org || "")));
-  tbl.append(cmpRow("Verdict", at.verdict, bt.verdict));
-  tbl.append(cmpRow("Sources", String(at.sources), String(bt.sources), at.sources === bt.sources));
+  hdr.append(el("div", "cmpK", ""));
+  labels.forEach((l, i) => hdr.append(cmpCol(l, reports[i], i === 0)));
+  tbl.append(hdr);
+  for (const [label, key] of CMP_ROWS) {
+    const vals = atts.map((a) => a[key] ?? null);
+    if (vals.every((v) => v == null)) continue;
+    tbl.append(cmpRow(label, vals));
+  }
   box.append(tbl);
 
-  // \u2500\u2500 diff des signaux : communs / propres \u00e0 A / propres \u00e0 B \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-  const ca = sigCats(A), cb = sigCats(B);
-  const common = [...ca.keys()].filter((k) => cb.has(k));
-  const onlyA = [...ca.keys()].filter((k) => !cb.has(k));
-  const onlyB = [...cb.keys()].filter((k) => !ca.has(k));
-  if (common.length || onlyA.length || onlyB.length) {
-    const sd = el("div", "cmpSigDiff");
-    const grp = (title, keys, src, cls) => {
-      if (!keys.length) return;
-      const g = el("div", "cmpSigGrp " + cls);
-      g.append(el("div", "cmpSigT", title));
-      const w = el("div", "cmpSigW");
-      keys.forEach((k) => w.append(sigChip(src.get(k), false)));
-      g.append(w); sd.append(g);
-    };
-    grp("Communs", common, ca, "gCommon");
-    grp("Propres \u00e0 A", onlyA, ca, "gA");
-    grp("Propres \u00e0 B", onlyB, cb, "gB");
-    box.append(sd);
+  if (reports.filter(Boolean).length < 2) {
+    box.append(el("div", "cmpErr", "Comparaison impossible : au moins deux observables doivent être reconnus."));
+    return;
   }
+  box.append(cmpRelation(labels, reports));
+  const sd = cmpSignals(labels, reports);
+  if (sd) box.append(sd);
 }
 async function doCompare() {
-  const a = $("cmpA").value.trim();
+  if (!cmpReady()) return;
   const b = $("cmpB").value.trim();
-  if (!a || !b) { toast("Remplissez les deux observables"); return; }
+  if (!b) { toast("Indiquez au moins un observable à comparer"); $("cmpB").focus(); return; }
+  const items = [CUR.query, b];
+  if (!$("cmpSlotC").hidden) {
+    const c = $("cmpC").value.trim();
+    if (c) items.push(c);
+  }
 
   const btn = $("cmpGo");
   const res = $("cmpResults");
-  btn.disabled = true; btn.textContent = "\u2026";
+  btn.disabled = true; btn.textContent = "…";
   res.hidden = false;
-  res.replaceChildren(el("div", "cmpLoading", "Comparaison\u2026"));
+  res.replaceChildren(el("div", "cmpLoading", "Comparaison…"));
 
   try {
-    const body = token() ? JSON.stringify({ a, b, token: token() }) : JSON.stringify({ a, b });
-    const r = await fetch("/compare", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+    const payload = { items: items.slice(0, CMP_MAX_EXTRA + 1) };
+    if (token()) payload.token = token();
+    const r = await fetch("/compare", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
     const data = await r.json().catch(() => null);
     if (!r.ok || !data) throw new Error(data?.error || `erreur ${r.status}`);
-    renderComparison(res, a, b, data.a, data.b);
+    const reports = Array.isArray(data.items) ? data.items : [data.a, data.b];
+    renderComparison(res, items, reports);
   } catch (err) {
-    res.replaceChildren(el("div", "cmpErr", err.message || "Erreur r\u00e9seau"));
+    res.replaceChildren(el("div", "cmpErr", err.message || "Erreur réseau"));
   } finally {
     btn.disabled = false; btn.textContent = "Comparer";
   }
@@ -1379,18 +1532,11 @@ $("cmpBtn").onclick = openComparator;
 $("cmpClose").onclick = closeComparator;
 $("comparator").addEventListener("click", (e) => { if (e.target === $("comparator")) closeComparator(); });
 $("cmpGo").onclick = doCompare;
-$("cmpA").addEventListener("keydown", (e) => { if (e.key === "Enter") $("cmpB").focus(); });
+$("cmpAdd").onclick = addSlotC;
+$("cmpDropC").onclick = dropSlotC;
 $("cmpB").addEventListener("keydown", (e) => { if (e.key === "Enter") doCompare(); });
-/* focus trap pour le comparateur */
-$("comparator").addEventListener("keydown", (e) => {
-  if (e.key !== "Tab") return;
-  const f = [...$("comparator").querySelectorAll('button, input, [href], [tabindex]:not([tabindex="-1"])')]
-    .filter((x) => !x.disabled && x.offsetParent !== null);
-  if (!f.length) return;
-  const first = f[0], last = f[f.length - 1];
-  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-});
+$("cmpC").addEventListener("keydown", (e) => { if (e.key === "Enter") doCompare(); });
+trapFocus($("comparator"));
 
 /* ---------- init ---------- */
 refreshTokenBtn();

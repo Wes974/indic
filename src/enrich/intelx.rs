@@ -64,7 +64,7 @@ async fn search(ctx: &Ctx, key: &str, term: &str) -> Result<Vec<Record>> {
         tokio::time::sleep(Duration::from_millis(1_500)).await;
         result = fetch_result(ctx, key, &id).await?;
     }
-    Ok(result.records)
+    Ok(result.records.unwrap_or_default())
 }
 
 async fn fetch_result(ctx: &Ctx, key: &str, id: &str) -> Result<ResultResp> {
@@ -117,8 +117,11 @@ struct StartResp {
 #[derive(Deserialize)]
 struct ResultResp {
     status: Option<i64>,
+    /// IntelX renvoie `"records": null` (et pas `[]`) quand il n'y a aucun
+    /// résultat. `#[serde(default)]` seul ne couvre que le champ *absent* :
+    /// sans `Option`, le null fait échouer toute la désérialisation.
     #[serde(default)]
-    records: Vec<Record>,
+    records: Option<Vec<Record>>,
 }
 
 #[derive(Deserialize)]
@@ -126,7 +129,11 @@ pub struct Record {
     /// Identifiant unique IntelX (GUID) — clé de dédup stable pour la veille.
     #[serde(default)]
     pub systemid: String,
+    /// `default` sur tous les champs : un seul champ absent faisait échouer la
+    /// désérialisation de TOUTE la recherche (même classe de bug que records:null).
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub bucketh: String,
 }
 
@@ -154,5 +161,21 @@ mod tests {
         assert!(e.error.is_none());
         assert!(e.signals.is_empty());
         assert!(e.facts.iter().any(|f| f.key == "records" && f.value == "0"));
+    }
+
+    /// Régression : IntelX renvoie `"records": null` quand il n'y a aucun
+    /// résultat — ça faisait échouer toute la recherche (veille pastes KO).
+    #[test]
+    fn result_resp_tolerates_null_records() {
+        let null_records: ResultResp =
+            serde_json::from_str(r#"{"status":0,"records":null}"#).unwrap();
+        assert!(null_records.records.unwrap_or_default().is_empty());
+
+        let missing: ResultResp = serde_json::from_str(r#"{"status":0}"#).unwrap();
+        assert!(missing.records.unwrap_or_default().is_empty());
+
+        let present: ResultResp =
+            serde_json::from_str(r#"{"status":0,"records":[{"systemid":"abc"}]}"#).unwrap();
+        assert_eq!(present.records.unwrap_or_default().len(), 1);
     }
 }

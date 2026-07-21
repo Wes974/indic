@@ -197,7 +197,9 @@ fn build_ctx(cfg: &Config) -> Result<Arc<enrich::Ctx>> {
         http,
         keys,
         token: std::env::var("INDIC_TOKEN").ok().filter(|s| !s.is_empty()),
-        cache: enrich::Cache::default(),
+        // `with_data_dir` : les compteurs de quota sont persistés (un quota
+        // mensuel doit survivre aux redéploiements).
+        cache: enrich::Cache::with_data_dir(&cfg.data_dir),
         history,
         rate_limiter: rate::RateLimiter::new(),
         registry,

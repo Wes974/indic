@@ -118,11 +118,20 @@ const ENRICHER_TIMEOUT: Duration = Duration::from_secs(10);
 /// produit que des rejets — et chez certains fournisseurs (Validin) une
 /// notification de quota par jour. On recule jusqu'au reset probable.
 const RATE_LIMIT_TTL: Duration = Duration::from_secs(6 * 3600);
-/// Quotas journaliers **durs** côté fournisseur, appliqués localement avec une
-/// marge (on s'arrête juste en dessous). Empêche d'émettre le moindre appel une
-/// fois le plafond atteint → aucun 429, donc aucun mail de quota.
-const DAILY_QUOTA: &[(&str, u32)] = &[
-    ("validin", 9), // free tier = 10/jour
+/// Fenêtre de réinitialisation d'un quota fournisseur.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum QuotaWindow {
+    Day,
+    /// Mois **civil** (le fournisseur remet à zéro le 1er), pas 30 jours glissants.
+    Month,
+}
+
+/// Quotas **durs** côté fournisseur, appliqués localement avec une marge (on
+/// s'arrête juste en dessous). Empêche d'émettre le moindre appel une fois le
+/// plafond atteint → aucun 429, donc aucune notification de quota.
+const QUOTAS: &[(&str, u32, QuotaWindow)] = &[
+    ("validin", 9, QuotaWindow::Day),    // free tier = 10/jour
+    ("fullhunt", 9, QuotaWindow::Month), // free tier = 10/mois
 ];
 
 /// Vrai si l'erreur d'un enricher traduit un rate-limit / quota épuisé.
@@ -130,12 +139,60 @@ fn is_rate_limited(err: &str) -> bool {
     err.contains("429") || err.to_ascii_lowercase().contains("too many requests")
 }
 
-/// Quota journalier local d'une source (`None` = pas de plafond).
-fn daily_quota(source: &str) -> Option<u32> {
-    DAILY_QUOTA
+/// Quota local d'une source (`None` = pas de plafond).
+fn quota_of(source: &str) -> Option<(u32, QuotaWindow)> {
+    QUOTAS
         .iter()
-        .find(|(s, _)| *s == source)
-        .map(|(_, n)| *n)
+        .find(|(s, _, _)| *s == source)
+        .map(|(_, n, w)| (*n, *w))
+}
+
+/// Identifiant de la fenêtre de quota courante : numéro de jour depuis l'epoch,
+/// ou numéro de mois civil. Dès qu'il change, le compteur repart à zéro.
+fn window_id(window: QuotaWindow) -> u64 {
+    let days = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() / 86_400)
+        .unwrap_or(0) as i64;
+    match window {
+        QuotaWindow::Day => days.max(0) as u64,
+        QuotaWindow::Month => {
+            let (y, m) = civil_year_month(days);
+            (y * 12 + m as i64 - 1).max(0) as u64
+        }
+    }
+}
+
+/// (année, mois) civils depuis un nombre de jours depuis l'epoch Unix.
+/// `civil_from_days` de Howard Hinnant (domaine public) — évite d'ajouter une
+/// dépendance date pour ce seul besoin.
+fn civil_year_month(days: i64) -> (i64, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m as u32)
+}
+
+/// Relit les compteurs de quota persistés (`source<TAB>fenêtre<TAB>appels`).
+/// Fichier absent ou ligne illisible → ignoré (on repart de zéro pour la source).
+fn load_quota(path: &std::path::Path) -> HashMap<String, (u64, u32)> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    text.lines()
+        .filter_map(|l| {
+            let mut it = l.split('\t');
+            let source = it.next()?.trim();
+            let window: u64 = it.next()?.trim().parse().ok()?;
+            let used: u32 = it.next()?.trim().parse().ok()?;
+            (!source.is_empty()).then(|| (source.to_string(), (window, used)))
+        })
+        .collect()
 }
 
 /// Compteurs atomiques par source, pour l'endpoint `/metrics`.
@@ -171,9 +228,13 @@ pub struct Cache {
     host_sems: Mutex<HashMap<String, Arc<Semaphore>>>,
     /// Compteurs par source (ok/err/cache-hit/latence), créés à la volée.
     stats: Mutex<HashMap<String, Arc<SourceStat>>>,
-    /// Appels du jour par source, pour les sources à quota journalier dur.
-    /// `(jour depuis l'epoch, compteurs)` — remis à zéro au changement de jour.
-    daily: Mutex<(u64, HashMap<String, u32>)>,
+    /// Compteurs de quota par source : `source -> (fenêtre courante, appels)`.
+    /// **Persisté sur disque** : un quota mensuel (fullhunt = 10/mois) ne
+    /// survivrait pas aux redéploiements sinon — chaque restart le remettrait à
+    /// zéro et on dépasserait le plafond réel en quelques déploiements.
+    quota: Mutex<HashMap<String, (u64, u32)>>,
+    /// Fichier de persistance des compteurs (`None` = mémoire seule, pour les tests).
+    quota_path: Option<std::path::PathBuf>,
 }
 
 impl Default for Cache {
@@ -183,7 +244,8 @@ impl Default for Cache {
             sem: Semaphore::new(OUTBOUND_MAX),
             host_sems: Mutex::new(HashMap::new()),
             stats: Mutex::new(HashMap::new()),
-            daily: Mutex::new((0, HashMap::new())),
+            quota: Mutex::new(HashMap::new()),
+            quota_path: None,
         }
     }
 }
@@ -199,27 +261,51 @@ impl Cache {
             .clone()
     }
 
-    /// Réserve un appel dans le quota journalier de `source`.
-    /// `false` = plafond atteint aujourd'hui → aucun appel réseau ne doit
-    /// partir. Le compteur se remet à zéro au changement de jour (UTC).
-    fn take_daily_slot(&self, source: &str) -> bool {
-        let Some(limit) = daily_quota(source) else {
+    /// Cache dont les compteurs de quota sont persistés dans `data_dir`
+    /// (indispensable pour un quota mensuel : sinon chaque redéploiement
+    /// remettrait le compteur à zéro).
+    pub fn with_data_dir(data_dir: &std::path::Path) -> Self {
+        let path = data_dir.join("quota.tsv");
+        Self {
+            quota: Mutex::new(load_quota(&path)),
+            quota_path: Some(path),
+            ..Self::default()
+        }
+    }
+
+    /// Réserve un appel dans le quota de `source`. `false` = plafond atteint
+    /// pour la fenêtre en cours → aucun appel réseau ne doit partir. Le
+    /// compteur repart à zéro au changement de fenêtre (jour ou mois civil).
+    fn take_quota_slot(&self, source: &str) -> bool {
+        let Some((limit, window)) = quota_of(source) else {
             return true; // pas de plafond pour cette source
         };
-        let today = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() / 86_400)
-            .unwrap_or(0);
-        let mut guard = self.daily.lock();
-        if guard.0 != today {
-            *guard = (today, HashMap::new());
-        }
-        let used = guard.1.entry(source.to_string()).or_insert(0);
-        if *used >= limit {
-            return false;
-        }
-        *used += 1;
+        let now = window_id(window);
+        let snapshot = {
+            let mut guard = self.quota.lock();
+            let entry = guard.entry(source.to_string()).or_insert((now, 0));
+            if entry.0 != now {
+                *entry = (now, 0); // nouvelle fenêtre → remise à zéro
+            }
+            if entry.1 >= limit {
+                return false;
+            }
+            entry.1 += 1;
+            guard.clone()
+        }; // verrou relâché avant l'écriture disque
+        self.save_quota(&snapshot);
         true
+    }
+
+    /// Écrit les compteurs (`source<TAB>fenêtre<TAB>appels`). Best-effort : un
+    /// échec d'écriture ne doit jamais casser un lookup.
+    fn save_quota(&self, map: &HashMap<String, (u64, u32)>) {
+        let Some(path) = &self.quota_path else { return };
+        let body: String = map
+            .iter()
+            .map(|(s, (w, n))| format!("{s}\t{w}\t{n}\n"))
+            .collect();
+        let _ = std::fs::write(path, body);
     }
 
     /// Compteur d'une source (créé à la volée).
@@ -276,13 +362,17 @@ impl Cache {
             hit.source = format!("{} (cache)", hit.source);
             return hit;
         }
-        // Quota journalier local : on s'arrête AVANT d'émettre l'appel, donc la
-        // source ne voit jamais de dépassement (pas de 429, pas de mail).
-        if !self.take_daily_slot(&source) {
-            let limit = daily_quota(&source).unwrap_or(0);
+        // Quota local : on s'arrête AVANT d'émettre l'appel, donc la source ne
+        // voit jamais de dépassement (pas de 429, pas de notification de quota).
+        if !self.take_quota_slot(&source) {
+            let (limit, window) = quota_of(&source).unwrap_or((0, QuotaWindow::Day));
+            let (unit, retry) = match window {
+                QuotaWindow::Day => ("j", "demain"),
+                QuotaWindow::Month => ("mois", "le mois prochain"),
+            };
             let enr = Enrichment::failed(
                 &source,
-                format!("quota journalier local atteint ({limit}/j) — réessai demain"),
+                format!("quota local atteint ({limit}/{unit}) — réessai {retry}"),
             );
             self.stat(&source).err.fetch_add(1, Ordering::Relaxed);
             self.insert_bounded(key, enr.clone());
@@ -351,7 +441,7 @@ impl Cache {
 
 #[cfg(test)]
 mod cache_throttle_tests {
-    use super::{Cache, PER_SOURCE_MAX, daily_quota, is_rate_limited};
+    use super::{Cache, PER_SOURCE_MAX, QuotaWindow, civil_year_month, is_rate_limited, quota_of};
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
 
@@ -369,20 +459,56 @@ mod cache_throttle_tests {
     }
 
     #[test]
-    fn daily_slot_caps_quota_source() {
+    fn quota_caps_daily_and_monthly_sources() {
         let cache = Cache::default();
-        let limit = daily_quota("validin").expect("validin a un quota journalier");
-        // On peut consommer exactement `limit` appels…
-        for _ in 0..limit {
-            assert!(cache.take_daily_slot("validin"));
+        for (source, expected) in [
+            ("validin", QuotaWindow::Day),
+            ("fullhunt", QuotaWindow::Month),
+        ] {
+            let (limit, window) = quota_of(source).expect("source à quota");
+            assert_eq!(window, expected);
+            // On consomme exactement `limit` appels…
+            for _ in 0..limit {
+                assert!(cache.take_quota_slot(source));
+            }
+            // …puis c'est fermé jusqu'à la fenêtre suivante.
+            assert!(!cache.take_quota_slot(source));
         }
-        // …puis c'est fermé jusqu'au lendemain.
-        assert!(!cache.take_daily_slot("validin"));
         // Une source sans plafond n'est jamais bloquée.
-        assert!(daily_quota("dns").is_none());
+        assert!(quota_of("dns").is_none());
         for _ in 0..100 {
-            assert!(cache.take_daily_slot("dns"));
+            assert!(cache.take_quota_slot("dns"));
         }
+    }
+
+    #[test]
+    fn civil_year_month_anchors() {
+        assert_eq!(civil_year_month(0), (1970, 1)); // epoch
+        assert_eq!(civil_year_month(19_722), (2023, 12));
+        assert_eq!(civil_year_month(19_723), (2024, 1)); // passage d'année
+    }
+
+    /// Le point critique du quota **mensuel** : sans persistance, chaque
+    /// redéploiement remettrait le compteur à zéro et on dépasserait les 10/mois.
+    #[test]
+    fn monthly_quota_survives_restart() {
+        let dir = std::env::temp_dir().join("indic_quota_persist_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::remove_file(dir.join("quota.tsv"));
+
+        let before = Cache::with_data_dir(&dir);
+        assert!(before.take_quota_slot("fullhunt"));
+        assert!(before.take_quota_slot("fullhunt"));
+
+        // « Redémarrage » : le compteur est relu, les 2 appels restent comptés.
+        let after = Cache::with_data_dir(&dir);
+        let (limit, _) = quota_of("fullhunt").unwrap();
+        for _ in 0..(limit - 2) {
+            assert!(after.take_quota_slot("fullhunt"));
+        }
+        assert!(!after.take_quota_slot("fullhunt"));
+
+        let _ = std::fs::remove_file(dir.join("quota.tsv"));
     }
 
     #[test]

@@ -1549,6 +1549,9 @@ else showLanding();   // sans requête : page d'accueil (champ vide + entrée = 
 // le versionnage du cache + clients.claim() ; désinscrire à chaque chargement
 // (ce qu'on faisait avant) le démolissait avant qu'il prenne le contrôle de la
 // page, donc le fallback hors-ligne ne fonctionnait jamais.
+// Le ?v= suit SW_VERSION (src/api.rs) : Cloudflare met les .js en cache 4 h en
+// écrasant le Cache-Control de l'origine, donc seule une URL différente propage
+// un nouveau worker sans délai. Un test Rust vérifie que les deux concordent.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.register('/sw.js?v=3').catch(() => {});
 }

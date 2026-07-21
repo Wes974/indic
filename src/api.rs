@@ -114,17 +114,34 @@ async fn healthz() -> &'static str {
 /// La mise à jour repose sur `skipWaiting` + `clients.claim` + le versionnage
 /// de `CACHE` : bumper la version purge les caches précédents à l'activation.
 ///
-/// `Cache-Control: no-cache` est indispensable : sans en-tête explicite,
-/// Cloudflare applique son TTL par défaut aux `.js` (4 h) et continue de servir
-/// l'ancien worker longtemps après un déploiement — un correctif de SW resterait
-/// invisible en prod.
+/// **Toute évolution du worker impose de bumper [`SW_VERSION`]** — un test
+/// vérifie que la version, le nom de cache et l'URL d'enregistrement côté
+/// client restent alignés.
 async fn service_worker() -> (
     StatusCode,
     [(axum::http::header::HeaderName, &'static str); 2],
     &'static str,
 ) {
-    // v3 : purge les caches v1/v2, qui contenaient les réponses /lookup.
-    let sw = r#"const CACHE = 'indic-v3';
+    (
+        StatusCode::OK,
+        [
+            (axum::http::header::CONTENT_TYPE, "application/javascript"),
+            (axum::http::header::CACHE_CONTROL, "no-cache"),
+        ],
+        SW_JS,
+    )
+}
+
+/// Source du worker. Le numéro de version du nom de cache (`indic-vN`) doit
+/// être répercuté dans l'URL `/sw.js?v=N` enregistrée par `app.js` — c'est
+/// vérifié par `sw_version_is_consistent`.
+///
+/// Ce query string n'est pas cosmétique : l'origine envoie bien
+/// `Cache-Control: no-cache`, mais **Cloudflare le réécrit en `max-age=14400`**
+/// au bord (constaté en prod : `cf-cache-status: HIT`, `age: 6721`). Changer
+/// l'URL à chaque version est le seul levier côté code pour qu'un nouveau
+/// worker atteigne les visiteurs sans attendre 4 h ni purger la zone.
+const SW_JS: &str = r#"const CACHE = 'indic-v3';
 self.addEventListener('install', (e) => e.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', (e) => {
   e.waitUntil(
@@ -148,14 +165,30 @@ self.addEventListener('fetch', (e) => {
   );
 });
 "#;
-    (
-        StatusCode::OK,
-        [
-            (axum::http::header::CONTENT_TYPE, "application/javascript"),
-            (axum::http::header::CACHE_CONTROL, "no-cache"),
-        ],
-        sw,
-    )
+
+#[cfg(test)]
+mod sw_tests {
+    use super::SW_JS;
+
+    /// La version portée par le nom de cache du worker doit être celle que
+    /// `app.js` demande dans son URL d'enregistrement. Bumper l'une sans l'autre
+    /// donne soit un cache jamais purgé, soit un worker jamais mis à jour
+    /// derrière le cache Cloudflare — deux pannes parfaitement silencieuses.
+    #[test]
+    fn sw_version_is_consistent() {
+        let version = SW_JS
+            .split("'indic-v")
+            .nth(1)
+            .and_then(|s| s.split('\'').next())
+            .expect("nom de cache 'indic-vN' introuvable dans le service worker");
+        let register_url = format!("'/sw.js?v={version}'");
+        let app_js = include_str!("web/app.js");
+        assert!(
+            app_js.contains(&register_url),
+            "src/web/app.js doit enregistrer le worker via {register_url} \
+             (version lue dans le nom de cache du SW)"
+        );
+    }
 }
 
 /// `GET /metrics` — compteurs par source. Format par défaut JSON, `?format=prometheus`

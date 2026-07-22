@@ -94,6 +94,12 @@ function authHeaders() {
 /* ---------- thème ---------- */
 /** @type {ReturnType<typeof createPivotGraph> | null} */
 let GRAPH = null;   // instance du graphe de pivots (déclarée tôt : applyTheme la référence)
+/** @type {ReturnType<typeof createPivotGraph> | null} */
+// Déclarée ici pour la même raison que GRAPH : applyTheme() tourne dès le
+// chargement et redessine les deux canvas. Déclarée plus bas, `let` la laisse
+// en zone morte temporelle et le premier applyTheme lève — la fiche ne
+// s'affichait plus du tout.
+let CMP_GRAPH = null;
 const V_CACHE = new Map();   // cache verdict labels per value (évite refetcher le verdict)
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
@@ -106,6 +112,7 @@ function applyTheme(t) {
   tb.setAttribute("aria-label", lbl);
   tb.title = lbl;
   GRAPH?.redraw();   // le Canvas doit re-résoudre ses couleurs
+  CMP_GRAPH?.redraw();
 }
 applyTheme(LS.get("indic_theme", "dark"));
 $("themeBtn").onclick = () => {
@@ -1653,13 +1660,59 @@ function openComparator() {
   dropSlotC();
   $input("cmpB").value = "";
   const res = $("cmpResults"); res.hidden = true; res.replaceChildren();
+  destroyCmpGraph();
   $("comparator").hidden = false;
   requestAnimationFrame(() => $("cmpB").focus());
 }
 function closeComparator() {
+  // Le graphe tourne dans un canvas animé : le laisser vivre derrière un
+  // overlay fermé consommerait du CPU pour rien.
+  destroyCmpGraph();
   $("comparator").hidden = true;
   if (CMP_RETURN && CMP_RETURN.focus) CMP_RETURN.focus();
   else $("cmpBtn").focus();
+}
+
+/* ---------- comparateur : graphe de la relation ---------- */
+function destroyCmpGraph() {
+  CMP_GRAPH?.destroy();
+  CMP_GRAPH = null;
+  $("cmpGraphCard").hidden = true;
+}
+/**
+ * Graphe centré sur le sujet : les observables comparés en satellites, puis
+ * les pivots qu'ils partagent. Rendre la relation visible plutôt que la
+ * décrire en une phrase — et sans toucher au graphe de la fiche, qui reste
+ * une instance séparée avec son propre conteneur.
+ */
+function renderCmpGraph(labels, reports) {
+  destroyCmpGraph();
+  const subject = reports[0];
+  if (!subject) return;
+
+  /** @type {{relation: string, kind: string, value: string}[]} */
+  const pivots = [];
+  const seen = new Set([labels[0]]);
+  // Les autres observables d'abord : ce sont eux qu'on veut voir reliés.
+  labels.slice(1).forEach((l, i) => {
+    if (reports[i + 1] && seen.add(l)) {
+      pivots.push({ relation: "comparé", kind: reports[i + 1].kind || "", value: l });
+    }
+  });
+  // Puis les pivots partagés par toutes les colonnes : ce qui les relie.
+  const sets = reports.map((r) => new Set((r ? collectPivots(r) : []).map((p) => `${p.kind}|${p.value}`)));
+  for (const p of collectPivots(subject)) {
+    if (sets.every((s) => s.has(`${p.kind}|${p.value}`)) && seen.add(p.value)) {
+      pivots.push({ relation: "commun", kind: p.kind, value: p.value });
+    }
+  }
+  // Sous 3 nœuds, un graphe n'apprend rien de plus que la ligne de relation.
+  if (pivots.length < 2) return;
+
+  const card = $("cmpGraphCard");
+  card.hidden = false;
+  CMP_GRAPH = createPivotGraph(
+    card, $("cmpGlegend"), labels[0], subject.kind, pivots, subject.verdict?.label);
 }
 
 /* ---------- comparateur : rendu diff-first ---------- */
@@ -1815,6 +1868,7 @@ function renderComparison(box, labels, reports) {
     box.append(el("div", "cmpErr", "Comparaison impossible : au moins deux observables doivent être reconnus."));
     return;
   }
+  renderCmpGraph(labels, reports);
   box.append(cmpRelation(labels, reports));
   const sd = cmpSignals(labels, reports);
   if (sd) box.append(sd);

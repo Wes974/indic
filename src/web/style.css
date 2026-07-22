@@ -529,6 +529,10 @@ footer {
 .keyitem.no .kname { color: var(--ink3); }
 .keyempty { font: 400 12px/1.5 var(--sans); color: var(--ink3); font-style: italic; }
 
+/* ── comparateur : graphe de la relation ── */
+.cmpGraph { margin-top: 16px; }
+.cmpGraph[hidden] { display: none; }
+
 /* ── corrélations avec l historique ── */
 #corr { display: flex; flex-direction: column; gap: 10px; }
 .corrRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;

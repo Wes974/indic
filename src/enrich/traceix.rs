@@ -12,10 +12,9 @@
 
 use anyhow::Result;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::json;
 
 use crate::enrich::{Ctx, Enrichment, Fact};
-use crate::model::Signal;
 
 const ENDPOINT: &str = "https://ai.perkinsfund.org/api/traceix/v1/capa/search";
 
@@ -26,9 +25,22 @@ struct Envelope {
     success: bool,
     #[serde(default)]
     error: Option<ErrorBody>,
-    /// Forme non figée côté service : conservée en `Value` et lue défensivement.
+    /// Tableau des capacités CAPA (vide ou absent si le hash est inconnu).
     #[serde(default)]
-    results: Option<Value>,
+    results: Option<Vec<Capability>>,
+}
+
+/// Une capacité CAPA telle que renvoyée par Traceix.
+#[derive(Deserialize)]
+struct Capability {
+    #[serde(default)]
+    name: String,
+    /// Paires `[tactique, technique]` MITRE ATT&CK.
+    #[serde(default)]
+    attack: Vec<Vec<String>>,
+    /// Paires `[comportement, identifiant]` du Malware Behavior Catalog.
+    #[serde(default)]
+    catalog: Vec<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -92,106 +104,67 @@ fn build(env: &Envelope) -> Enrichment {
         return Enrichment::failed("traceix", reason);
     }
 
-    let results = env.results.as_ref().unwrap_or(&Value::Null);
-    let mut facts = vec![Fact::new("traceix", "hash connu")];
-    let mut signals = Vec::new();
-
-    // La forme exacte de `results` n'est pas figée par le service : on lit ce
-    // qu'on reconnaît et on résume le reste, plutôt que d'imposer un schéma qui
-    // casserait au premier changement.
-    if let Some(v) = str_field(
-        results,
-        &["verdict", "classification", "label", "prediction"],
-    ) {
-        facts.push(Fact::new("classification", &v));
-        let low = v.to_ascii_lowercase();
-        if low.contains("malicious") || low.contains("malware") {
-            signals.push(Signal::with_detail(
-                "traceix",
-                "malicious",
-                format!("classé {v} par Traceix"),
-            ));
-        } else if low.contains("suspicious") {
-            signals.push(Signal::with_detail(
-                "traceix",
-                "suspicious",
-                format!("classé {v} par Traceix"),
-            ));
-        }
-    }
-    if let Some(fam) = str_field(results, &["family", "malware_family"]) {
-        facts.push(Fact::new("famille", &fam));
-    }
-    if let Some(score) = results
-        .get("confidence")
-        .or_else(|| results.get("score"))
-        .and_then(Value::as_f64)
-    {
-        facts.push(Fact::new("confiance", format!("{:.0} %", score * 100.0)));
+    // Forme réelle observée en production : `results` est un tableau plat de
+    // capacités CAPA, chacune `{name, attack: [[tactique, Txxxx]], catalog:
+    // [[comportement, ID MBC]]}`. Pas de verdict : CAPA décrit ce que le
+    // binaire *sait faire*, pas s'il est malveillant — allouer de la mémoire
+    // n'accuse personne. On expose donc des faits, sans lever de signal.
+    let caps: &[Capability] = env.results.as_deref().unwrap_or(&[]);
+    if caps.is_empty() {
+        return Enrichment::ok(
+            "traceix",
+            vec![Fact::new("traceix", "aucune capacité extraite")],
+        );
     }
 
-    // CAPA : liste de capacités observées dans le binaire.
-    let caps = capabilities(results);
-    if !caps.is_empty() {
-        facts.push(Fact::new("capacités", caps.len().to_string()));
+    let mut facts = vec![Fact::new("capacités", caps.len().to_string())];
+
+    // ATT&CK : l'information la plus exploitable pour du CTI, dédupliquée et
+    // triée pour rester stable d'un lookup à l'autre.
+    let mut attack: Vec<String> = caps
+        .iter()
+        .flat_map(|c| c.attack.iter())
+        .filter_map(|p| match p.as_slice() {
+            [tactic, id] => Some(format!("{id} ({tactic})")),
+            _ => None,
+        })
+        .collect();
+    attack.sort_unstable();
+    attack.dedup();
+    if !attack.is_empty() {
+        facts.push(Fact::new("att&ck", attack.join(", ")));
+    }
+
+    // MBC (Malware Behavior Catalog) : complément d'ATT&CK côté comportements.
+    let mut mbc: Vec<String> = caps
+        .iter()
+        .flat_map(|c| c.catalog.iter())
+        .filter_map(|p| p.first().cloned())
+        .collect();
+    mbc.sort_unstable();
+    mbc.dedup();
+    if !mbc.is_empty() {
         facts.push(Fact::new(
-            "capa",
-            caps.iter().take(6).cloned().collect::<Vec<_>>().join(", "),
+            "comportements",
+            mbc.iter().take(8).cloned().collect::<Vec<_>>().join(", "),
         ));
     }
 
-    // Aucun champ reconnu mais `success: true` → on le dit franchement plutôt
-    // que d'afficher une fiche vide qui laisserait croire à une absence.
-    if facts.len() == 1 && caps.is_empty() {
-        facts.push(Fact::new("résultat", "présent, format non reconnu"));
-    }
+    let names: Vec<&str> = caps.iter().map(|c| c.name.as_str()).collect();
+    facts.push(Fact::new(
+        "capa",
+        names.iter().take(8).copied().collect::<Vec<_>>().join(", "),
+    ));
 
-    Enrichment {
-        source: "traceix".into(),
-        facts,
-        signals,
-        pivots: vec![],
-        error: None,
-    }
-}
-
-/// Premier champ texte non vide parmi `keys`, cherché à la racine puis dans un
-/// éventuel objet imbriqué unique (les API enveloppent souvent leurs résultats).
-fn str_field(v: &Value, keys: &[&str]) -> Option<String> {
-    for k in keys {
-        if let Some(s) = v.get(*k).and_then(Value::as_str).filter(|s| !s.is_empty()) {
-            return Some(s.to_string());
-        }
-    }
-    // `results` peut être un tableau d'un seul élément.
-    if let Some(first) = v.as_array().and_then(|a| a.first()) {
-        return str_field(first, keys);
-    }
-    None
-}
-
-/// Noms de capacités CAPA, quel que soit l'emballage (tableau de chaînes ou
-/// tableau d'objets `{name|rule|capability}`).
-fn capabilities(v: &Value) -> Vec<String> {
-    let arr = v
-        .get("capabilities")
-        .or_else(|| v.get("capa"))
-        .or_else(|| v.get("rules"))
-        .and_then(Value::as_array);
-    let Some(arr) = arr else { return Vec::new() };
-    arr.iter()
-        .filter_map(|e| match e {
-            Value::String(s) => Some(s.clone()),
-            _ => str_field(e, &["name", "rule", "capability"]),
-        })
-        .collect()
+    Enrichment::ok("traceix", facts)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
-    fn env(v: Value) -> Envelope {
+    fn env(v: serde_json::Value) -> Envelope {
         serde_json::from_value(v).unwrap()
     }
 
@@ -228,67 +201,61 @@ mod tests {
         assert_eq!(e.error.as_deref(), Some("Invalid API key presented"));
     }
 
+    /// Extrait vérbatim d'une réponse réelle de l'API (hash présent dans le
+    /// dataset public IPFS de Traceix) — la première version du parseur visait
+    /// un objet `{verdict, capabilities}` qui n'existe pas, et aurait affiché
+    /// « format non reconnu » sur toutes les réponses valides.
     #[test]
-    fn malicious_classification_raises_a_signal() {
+    fn parses_the_real_capa_shape() {
         let e = build(&env(json!({
             "success": true,
-            "results": {"verdict": "malicious", "family": "Emotet", "confidence": 0.97}
+            "error": {},
+            "results": [
+                {"attack": [["Execution", "T1129"]], "catalog": [],
+                 "name": "Link Function At Runtime On Windows"},
+                {"attack": [["Defense Evasion", "T1564.003"]], "catalog": [],
+                 "name": "Hide Graphical Window"},
+                {"attack": [], "catalog": [["Debugger Detection", "B0001.019"]],
+                 "name": "Peb Access"},
+                {"attack": [["Execution", "T1129"]], "catalog": [["Allocate Memory", "C0007"]],
+                 "name": "Allocate Memory"}
+            ]
         })));
+        assert!(e.error.is_none());
         assert!(
             e.facts
                 .iter()
-                .any(|f| f.key == "famille" && f.value == "Emotet")
+                .any(|f| f.key == "capacités" && f.value == "4")
+        );
+        // T1129 apparaît deux fois dans la réponse : il ne doit sortir qu'une fois.
+        let atk = e.facts.iter().find(|f| f.key == "att&ck").expect("att&ck");
+        assert_eq!(atk.value, "T1129 (Execution), T1564.003 (Defense Evasion)");
+        assert!(
+            e.facts
+                .iter()
+                .any(|f| f.key == "comportements" && f.value.contains("Debugger Detection"))
         );
         assert!(
             e.facts
                 .iter()
-                .any(|f| f.key == "confiance" && f.value == "97 %")
+                .any(|f| f.key == "capa" && f.value.contains("Hide Graphical Window"))
         );
-        assert_eq!(e.signals.len(), 1);
-        assert_eq!(e.signals[0].category, "malicious");
-    }
-
-    /// `results` peut arriver enveloppé dans un tableau, ou porter des capacités
-    /// CAPA sous plusieurs formes — la lecture doit rester tolérante.
-    #[test]
-    fn tolerates_alternative_shapes() {
-        let e = build(&env(json!({
-            "success": true,
-            "results": [{"classification": "benign"}]
-        })));
-        assert!(e.facts.iter().any(|f| f.value == "benign"));
+        // CAPA décrit des capacités, pas une intention : aucun signal levé.
         assert!(
             e.signals.is_empty(),
-            "un verdict bénin ne doit pas lever de signal"
-        );
-
-        let e = build(&env(json!({
-            "success": true,
-            "results": {"capabilities": ["persist via registry", {"name": "inject into process"}]}
-        })));
-        assert!(
-            e.facts
-                .iter()
-                .any(|f| f.key == "capacités" && f.value == "2")
-        );
-        assert!(
-            e.facts
-                .iter()
-                .any(|f| f.key == "capa" && f.value.contains("inject into process"))
+            "une capacité n'est pas un verdict — allouer de la mémoire n'accuse personne"
         );
     }
 
-    /// `success: true` mais forme inconnue : on l'annonce au lieu d'afficher une
-    /// fiche vide qui se lirait comme « rien trouvé ».
+    /// `success: true` avec un tableau vide : le hash est connu mais rien n'a
+    /// été extrait. À dire explicitement plutôt que d'afficher une fiche vide.
     #[test]
-    fn unknown_shape_is_reported() {
-        let e = build(&env(
-            json!({"success": true, "results": {"quelque_chose": 1}}),
-        ));
+    fn empty_results_is_reported() {
+        let e = build(&env(json!({"success": true, "results": []})));
         assert!(
             e.facts
                 .iter()
-                .any(|f| f.value == "présent, format non reconnu")
+                .any(|f| f.value == "aucune capacité extraite")
         );
     }
 }

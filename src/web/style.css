@@ -529,6 +529,16 @@ footer {
 .keyitem.no .kname { color: var(--ink3); }
 .keyempty { font: 400 12px/1.5 var(--sans); color: var(--ink3); font-style: italic; }
 
+/* ── corrélations avec l historique ── */
+#corr { display: flex; flex-direction: column; gap: 10px; }
+.corrRow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 13px; }
+.corrTag { font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase;
+  border: 1px solid transparent; border-radius: 5px; padding: 5px 8px; white-space: nowrap; }
+.corrDetail { font: 400 12.5px/1.4 var(--sans); color: var(--ink2); }
+.corrRelated { display: flex; flex-wrap: wrap; gap: 5px; flex-basis: 100%; }
+.corrRelated .chip { font-size: 11px; padding: 3px 9px; }
+
 /* ── extracteur : analyse en lot ── */
 .exSum { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .bulkGo { margin-left: auto; }

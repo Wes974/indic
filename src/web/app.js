@@ -938,6 +938,52 @@ function showLanding() {
   }).catch(() => {});
 }
 
+/* ---------- corrélations avec l'historique ---------- */
+const CORR_HUE = { medium: "amber", low: "slate", info: "slate", high: "red" };
+const CORR_LABEL = {
+  same_24: "Même /24",
+  same_apex: "Même domaine",
+  recent_hashes: "Hashs récents",
+  same_year: "Même année",
+};
+/** Gated + dépend de INDIC_HISTORY : une absence n'est jamais une erreur. */
+async function loadCorrelations(query) {
+  const sec = $("secCorr");
+  sec.hidden = true;
+  if (!token()) return;   // route gated : inutile de tenter sans token
+  try {
+    const r = await fetch(`/correlate?q=${encodeURIComponent(query)}&token=${encodeURIComponent(token())}`);
+    if (!r.ok) return;    // 403 sans token, 404 si l'historique est désactivé
+    const list = await r.json();
+    if (!Array.isArray(list) || !list.length) return;
+
+    const box = $("corr");
+    box.replaceChildren();
+    for (const c of list) {
+      const row = el("div", "corrRow");
+      const hue = CORR_HUE[c.severity] || "slate";
+      const tag = el("span", "corrTag", CORR_LABEL[c.relation] || c.relation);
+      tag.style.color = `var(--h-${hue})`;
+      tag.style.borderColor = `var(--hbd-${hue})`;
+      tag.style.background = `var(--hbg-${hue})`;
+      row.append(tag, el("span", "corrDetail", c.detail));
+      // Les observables liés sont cliquables : c'est tout l'intérêt d'une
+      // corrélation, pouvoir rebondir dessus.
+      const w = el("div", "corrRelated");
+      for (const q of (c.related || []).slice(0, 12)) {
+        const b = el("button", "chip pchip");
+        b.append(el("span", "ctxt", trunc(q, 32)));
+        b.onclick = () => go(q);
+        w.append(b);
+      }
+      if (w.children.length) row.append(w);
+      box.append(row);
+    }
+    $("cntCorr").textContent = String(list.length);
+    sec.hidden = false;
+  } catch { /* réseau : la fiche reste utilisable sans corrélation */ }
+}
+
 /* ---------- rendu global ---------- */
 /** @type {any} */
 let CUR = null;
@@ -1035,6 +1081,7 @@ function render(data, info) {
   chipList($("pivots"), pivs, pivotChip, 40);
 
   renderSources(data);
+  loadCorrelations(data.query);
 
   const nSrc = (data.enrichments || []).length;
   $("elapsed").textContent = `${(info.ms / 1000).toFixed(2)} s · ${nSrc} source${nSrc > 1 ? "s" : ""}`;

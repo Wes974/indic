@@ -360,6 +360,64 @@ async fn settings(
         .map(|k| (k.to_string(), json!(ctx.key(k).is_some())))
         .collect();
     let configured = keys.values().filter(|v| v.as_bool() == Some(true)).count();
+
+    // Santé par source : c'est la vue qui manquait. Jusqu'ici, découvrir qu'une
+    // source était morte imposait de lancer un lookup et d'éplucher sa liste
+    // d'erreurs — fofa et zoomeye sont restés cassés des semaines comme ça.
+    let metrics: std::collections::HashMap<String, crate::enrich::SourceMetric> = ctx
+        .cache
+        .metrics()
+        .into_iter()
+        .map(|m| (m.source.clone(), m))
+        .collect();
+    // Une même source est enregistrée une fois par type d'observable qu'elle
+    // couvre (ip, domain, hash…) : sans dédup, la liste afficherait 102 lignes
+    // pour 74 sources réelles, dont des doublons parfaits.
+    let mut seen = std::collections::HashSet::new();
+    let mut sources: Vec<Value> = ctx
+        .registry
+        .entries
+        .iter()
+        .filter(|e| seen.insert(e.name()))
+        .map(|e| {
+            let name = e.name();
+            let key_name = e.key_name().filter(|k| *k != "__gated__");
+            let state = if ctx.disabled.contains(name) {
+                "disabled"
+            } else if key_name.is_some_and(|k| ctx.key(k).is_none()) {
+                "no_key"
+            } else {
+                "active"
+            };
+            let m = metrics.get(name);
+            let mut o = json!({
+                "name": name,
+                "state": state,
+                "key": key_name,
+                "ok": m.map(|m| m.ok).unwrap_or(0),
+                "err": m.map(|m| m.err).unwrap_or(0),
+                "cache_hit": m.map(|m| m.cache_hit).unwrap_or(0),
+                "avg_latency_ms": m.map(|m| m.avg_latency_ms).unwrap_or(0),
+                "last_error": m.and_then(|m| m.last_error.clone()),
+            });
+            if let Some((used, limit, unit)) = ctx.cache.quota_state(name) {
+                o["quota"] = json!({ "used": used, "limit": limit, "window": unit });
+            }
+            o
+        })
+        .collect();
+    // Les sources qui posent problème d'abord : c'est ce qu'on vient chercher.
+    let rank = |v: &Value| match v["state"].as_str() {
+        Some("disabled") => 0,
+        _ if v["last_error"].is_string() => 1,
+        Some("no_key") => 3,
+        _ => 2,
+    };
+    sources.sort_by(|a, b| {
+        rank(a)
+            .cmp(&rank(b))
+            .then_with(|| a["name"].as_str().cmp(&b["name"].as_str()))
+    });
     // Exposé pour que l'UI distingue « source absente » de « source coupée
     // volontairement » — sans ça, une source désactivée devient invisible et on
     // se demande six mois plus tard pourquoi elle ne répond plus.
@@ -371,6 +429,7 @@ async fn settings(
         "keys_configured": configured,
         "feed_version": crate::feeds::FEED_VERSION,
         "disabled_sources": disabled,
+        "sources": sources,
         "keys": keys,
     }))
     .into_response()

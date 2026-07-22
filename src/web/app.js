@@ -1304,6 +1304,69 @@ function renderEndpoints() {
     box.append(row);
   }
 }
+/* ---------- réglages : santé des sources ---------- */
+const SRC_STATE = {
+  disabled: { lbl: "coupée", hue: "slate" },
+  no_key:   { lbl: "sans clé", hue: "slate" },
+  active:   { lbl: "active", hue: "green" },
+};
+function renderSources(list) {
+  const box = $("setSources");
+  const sum = $("setSourcesSum");
+  box.replaceChildren();
+  sum.replaceChildren();
+  if (!list.length) { box.append(el("div", "keyempty", "Aucune source enregistrée.")); return; }
+
+  const n = (p) => list.filter(p).length;
+  const counts = [
+    ["actives", n((s) => s.state === "active"), "green"],
+    ["en erreur", n((s) => s.last_error), "red"],
+    ["coupées", n((s) => s.state === "disabled"), "amber"],
+    ["sans clé", n((s) => s.state === "no_key"), "slate"],
+  ];
+  for (const [lbl, v, hue] of counts) {
+    const c = el("span", "srcCount");
+    c.style.color = `var(--h-${hue})`;
+    c.append(el("b", null, String(v)), el("span", null, " " + lbl));
+    sum.append(c);
+  }
+
+  for (const s of list) {
+    const row = el("div", "srcRow" + (s.last_error ? " bad" : ""));
+    const dot = el("i", "kdot");
+    const hue = s.last_error ? "red" : (SRC_STATE[s.state] || SRC_STATE.active).hue;
+    dot.style.background = `var(--h-${hue})`;
+    row.append(dot, el("span", "srcName", s.name));
+
+    const st = el("span", "srcState");
+    st.style.color = `var(--h-${hue})`;
+    st.textContent = (SRC_STATE[s.state] || { lbl: s.state }).lbl;
+    row.append(st);
+
+    // Quota local : la barre montre d'un coup d'œil ce qu'il reste avant blocage.
+    const q = el("span", "srcQuota");
+    if (s.quota) {
+      q.textContent = `${s.quota.used}/${s.quota.limit} par ${s.quota.window}`;
+      if (s.quota.used >= s.quota.limit) q.classList.add("full");
+    }
+    row.append(q);
+
+    const stats = el("span", "srcStats");
+    stats.textContent = s.ok || s.err
+      ? `${s.ok} ok · ${s.err} err` + (s.avg_latency_ms ? ` · ${s.avg_latency_ms} ms` : "")
+      : "—";
+    row.append(stats);
+
+    // L'erreur occupe toute la largeur : c'est l'information qu'on vient chercher.
+    if (s.last_error) {
+      const e = el("div", "srcErr", trunc(s.last_error, 150));
+      e.title = s.last_error;
+      row.append(e);
+    }
+    box.append(row);
+  }
+}
+
 async function loadSettings() {
   renderEndpoints();
   const box = $("setKeys"); box.replaceChildren(el("div", "keyempty", "Chargement…"));
@@ -1317,6 +1380,7 @@ async function loadSettings() {
     const data = await res.json().catch(() => null);
     if (!res.ok || !data) { box.replaceChildren(el("div", "keyempty", "Impossible de charger les réglages.")); return; }
     renderKeys(data);
+    renderSources(data.sources || []);
   } catch {
     box.replaceChildren(el("div", "keyempty", "Réglages injoignables (réseau)."));
   }

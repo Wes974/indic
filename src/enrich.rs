@@ -231,6 +231,10 @@ struct SourceStat {
     neg_hit: AtomicU64,
     calls: AtomicU64,
     latency_ms_sum: AtomicU64,
+    /// Dernier message d'erreur observé. Sans lui, savoir *pourquoi* une source
+    /// est en panne impose de relancer un lookup et d'éplucher la réponse —
+    /// c'est comme ça que fofa et zoomeye sont restés cassés sans qu'on le voie.
+    last_error: Mutex<Option<String>>,
 }
 
 /// Vue sérialisable des compteurs d'une source (réponse `/metrics`).
@@ -243,6 +247,8 @@ pub struct SourceMetric {
     pub neg_hit: u64,
     pub calls: u64,
     pub avg_latency_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 /// Cache mémoire TTL par `(source:observable)` — protège les quotas API.
@@ -412,6 +418,23 @@ impl Cache {
             .clone()
     }
 
+    /// Quota local consommé pour une source, sur la fenêtre en cours.
+    /// `None` = pas de plafond déclaré pour cette source.
+    pub fn quota_state(&self, source: &str) -> Option<(u32, u32, &'static str)> {
+        let (limit, window) = quota_of(source)?;
+        let current = window_id(window);
+        let used = match self.quota.lock().get(source) {
+            // Compteur d'une fenêtre passée : il ne décrit plus rien d'utile.
+            Some((w, n)) if *w == current => *n,
+            _ => 0,
+        };
+        let unit = match window {
+            QuotaWindow::Day => "jour",
+            QuotaWindow::Month => "mois",
+        };
+        Some((used, limit, unit))
+    }
+
     /// Snapshot trié des compteurs par source (pour `/metrics`).
     pub fn metrics(&self) -> Vec<SourceMetric> {
         let map = self.stats.lock();
@@ -431,6 +454,7 @@ impl Cache {
                         .load(Ordering::Relaxed)
                         .checked_div(calls)
                         .unwrap_or(0),
+                    last_error: s.last_error.lock().clone(),
                 }
             })
             .collect();
@@ -496,8 +520,11 @@ impl Cache {
             .fetch_add(started.elapsed().as_millis() as u64, Ordering::Relaxed);
         if fresh.error.is_none() {
             stat.ok.fetch_add(1, Ordering::Relaxed);
+            // Un succès efface l'erreur mémorisée : elle décrirait un état révolu.
+            *stat.last_error.lock() = None;
         } else {
             stat.err.fetch_add(1, Ordering::Relaxed);
+            *stat.last_error.lock() = fresh.error.clone();
         }
         // Cache positif (succès, TTL de la source) ET négatif (erreur, NEG_TTL
         // court) : dans les deux cas on mémorise pour ne pas re-taper la source.
@@ -870,7 +897,7 @@ pub trait Enricher: Send + Sync {
 /// Registre des enrichers, construit au démarrage et partagé via `Ctx`.
 #[derive(Default)]
 pub struct Registry {
-    entries: Vec<Arc<dyn Enricher>>,
+    pub(crate) entries: Vec<Arc<dyn Enricher>>,
 }
 
 impl Registry {

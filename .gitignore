@@ -6,6 +6,8 @@
 
 # Secrets / config locale
 .env
+# Sauvegarde locale du .env du VPS (secrets réels — jamais dans le dépôt public)
+.env.vps.backup
 
 # Bases optionnelles
 *.mmdb

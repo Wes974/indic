@@ -4,15 +4,88 @@ All notable changes to indic.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-22
+
+Release centrée sur l'exploitation : ce que l'outil montre, comment on lui fait
+confiance, et comment on voit qu'il va mal.
+
 ### Added
-- **Enricher trait + Registry**: adding a new enricher is now a single line in `registry.rs` — no dispatch changes needed.
-- **Bulk export**: `POST /lookup/bulk` accepts `"format": "stix"|"csv"` to export all results as a single STIX 2.1 bundle or CSV.
-- **Tracing spans**: `#[tracing::instrument]` on `run()` and `dispatch()` for per-lookup timing in traces.
-- **Dockerfile with cargo-chef**: layer-cached dependency builds for faster rebuilds.
+
+**Interface**
+- **Comparateur** ancré à la fiche : l'observable affiché face à 1 ou 2 autres,
+  attributs alignés dans une grille unique, seules les lignes divergentes
+  marquées. Graphe de la relation, pivots communs cliquables, diff des signaux.
+  `POST /compare` accepte `{items:[…]}` (2 à 3) ; `{a,b}` reste supporté.
+- **Extracteur d'IOC** en overlay dédié (touche `e`), résultats groupés par type,
+  et **« Tout analyser »** qui enchaîne sur `/lookup/bulk` par lots de 20 avec
+  affichage progressif.
+- **Panneau « santé des sources »** dans les réglages : état (active / coupée /
+  sans clé), quota consommé, ok/err/latence et **dernière erreur** par source,
+  problèmes remontés en tête.
+- **Section Endpoints** dans les réglages : chaque route avec sa méthode, son
+  badge `token`, un lien d'ouverture et un `curl` prêt à coller.
+- **Corrélations** avec l'historique affichées dans la fiche, observables liés
+  cliquables.
+- Nouvelle marque (réticule), lisible dès 16 px, et image de preview sociale.
+
+**Sources**
+- **Traceix** : verdicts antivirus multi-moteurs, capacités CAPA avec techniques
+  MITRE ATT&CK, règle YARA générée — trois recherches par SHA-256 en parallèle.
+- **AURA** : classification IA par SHA-256, corpus distinct de Traceix.
+- **Décrypteurs de ransomware** : une adresse BTC rattachée à une famille mène
+  désormais à l'outil de déchiffrement public quand il existe.
+
+**Exploitation**
+- **Cache d'enrichissement persistant** : les résultats survivent aux
+  redéploiements. Les échecs, eux, ne sont pas persistés — une source qui a
+  échoué mérite une nouvelle tentative.
+- **Quotas locaux** par source, persistés (`validin` 9/jour, `fullhunt` 9/mois) :
+  l'appel n'est pas émis une fois le plafond atteint, donc aucun dépassement
+  côté fournisseur.
+- **`INDIC_DISABLED_SOURCES`** : couper une source sans toucher à sa clé.
+- **`INDIC_SKIP_BOOTSTRAP`** : démarrer sans télécharger les datasets (CI/e2e).
+
+**Qualité**
+- **Type-check du front** : JSDoc vérifié par `tsc --checkJs --noEmit`, sans
+  bundler ni étape de build. `$()` n'accepte que les identifiants réellement
+  présents dans `index.html`.
+- **CI front** : `node --check`, type-check et suite Playwright — le front
+  n'avait aucune barrière automatique.
+- **CodeQL** (rust + javascript-typescript) sur push, PR et hebdomadairement.
+- **Fixtures** : réponses réelles enregistrées et rejouées dans les tests.
+
+### Fixed
+
+- **Corrélations fausses** : le prédicat de recherche dans l'historique était
+  ignoré. Un lookup de `8.8.8.8` annonçait `1.1.1.1` comme étant dans son /24,
+  « domaines similaires » comparait 20 caractères de chaîne, et une IP revue
+  trois fois comptait pour trois. Prédicats réels + déduplication.
+- **Token en query string** : `/settings` et `/correlate` passaient le token
+  dans l'URL, donc dans l'historique du navigateur et les logs du proxy. Il
+  transite désormais en en-tête `x-indic-token`.
+- **`?q=` cassé** : `render()` déréférençait un élément que la landing crée
+  paresseusement. Tout lien partagé ou favori tombait sur « erreur réseau ».
+- **Service worker** : désinscrit à chaque chargement, il ne prenait jamais le
+  contrôle ; et il mettait en cache les réponses `/lookup`, laissant sur le
+  disque la trace de chaque observable analysé. Ne traite plus que la coquille.
+  URL versionnée `/sw.js?v=N`, Cloudflare écrasant le `Cache-Control` d'origine.
+- **Filtres de signaux** : « Autres » ne couvrait que la teinte `slate`, donc
+  certains signaux n'apparaissaient dans aucun filtre. Les trois filtres
+  partitionnent désormais l'ensemble, et un filtre vide est masqué.
+- **`build.rs`** échouait silencieusement si une balise d'`index.html` était
+  reformatée : page livrée sans style, build vert.
+- **IntelX** : `"records": null` faisait échouer la désérialisation
+  (`#[serde(default)]` ne couvre pas un champ nul).
+- Faux positif CodeQL critique levé en renommant `nonce` (compteur de
+  transactions Ethereum) en `tx_count`.
 
 ### Changed
-- `enrich.rs` dispatch rewritten from ~730 lines of per-type match arms to ~50-line `run_enrichers()` using the registry.
-- All enrich submodules made `pub(crate)` for registry access.
+
+- `GET /settings` expose `sources[]` et `disabled_sources`.
+- Pied de page réécrit ; la limite des listes gratuites est une mise en garde
+  visible, plus une subordonnée en fin de phrase.
+- README : captures regénérées, comparateur et extracteur documentés, table des
+  endpoints complétée, décompte des sources corrigé (~75).
 
 ## [0.2.0] — 2026-07-12
 

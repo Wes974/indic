@@ -1,6 +1,6 @@
 //! Types du rapport d'enrichissement — le contrat de sortie de l'API.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Type d'infrastructure derrière l'IP (dérivé du type d'ASN via ASdb).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -37,7 +37,7 @@ pub enum AnonType {
 }
 
 /// Un signal = une source qui a matché. Transparence totale, pas de boîte noire.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Signal {
     /// Identifiant de la source (`tor_exit_list`, `x4bnet_vpn`, ...).
     pub source: String,

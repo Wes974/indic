@@ -288,6 +288,22 @@ async fn serve(cfg: Config) -> Result<()> {
         });
     }
 
+    // Flush périodique du cache : l'arrêt propre l'écrit déjà, mais un `kill -9`
+    // ou un OOM ne laisse aucune chance de le faire. Toutes les 5 min, le pire
+    // cas de perte est borné à 5 min de travail d'enrichissement.
+    {
+        let cache_ctx = ctx.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_secs(300));
+            ticker.tick().await; // consomme le tick immédiat
+            loop {
+                ticker.tick().await;
+                cache_ctx.cache.save();
+            }
+        });
+    }
+
+    let shutdown_ctx = ctx.clone();
     let app = api::router(ctx);
 
     let listener = tokio::net::TcpListener::bind(&cfg.bind).await?;
@@ -295,6 +311,10 @@ async fn serve(cfg: Config) -> Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+    // Après l'arrêt propre : on écrit le cache avant de rendre la main, sinon
+    // chaque redéploiement (docker compose up = SIGTERM) le jetterait.
+    shutdown_ctx.cache.save();
+    tracing::info!("cache d'enrichissement sauvegardé avant l'arrêt");
     Ok(())
 }
 

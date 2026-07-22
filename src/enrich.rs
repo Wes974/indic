@@ -84,7 +84,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwap;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
 
 use crate::model::{IpReport, Signal};
@@ -196,6 +196,30 @@ fn load_quota(path: &std::path::Path) -> HashMap<String, (u64, u32)> {
         .collect()
 }
 
+/// Relit le cache persisté, en écartant ce qui a déjà expiré. Fichier absent,
+/// ligne illisible ou entrée périmée → ignoré silencieusement : un cache est un
+/// accélérateur, jamais une source de vérité qui doit empêcher le démarrage.
+fn load_entries(path: &std::path::Path) -> HashMap<String, (Instant, Enrichment)> {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return HashMap::new();
+    };
+    let now_u = unix_now();
+    let now_i = Instant::now();
+    text.lines()
+        .filter_map(|l| serde_json::from_str::<StoredEntry>(l).ok())
+        .filter_map(|e| {
+            // Âge conservé tel quel : l'entrée reprend exactement là où elle en
+            // était, sans repartir d'un TTL neuf qu'elle n'a pas mérité.
+            let age = Duration::from_secs(now_u.saturating_sub(e.at));
+            if age >= MAX_PERSIST_AGE {
+                return None;
+            }
+            Some((e.k, (now_i.checked_sub(age)?, e.v)))
+        })
+        .take(CACHE_MAX)
+        .collect()
+}
+
 /// Compteurs atomiques par source, pour l'endpoint `/metrics`.
 #[derive(Default)]
 struct SourceStat {
@@ -236,6 +260,11 @@ pub struct Cache {
     quota: Mutex<HashMap<String, (u64, u32)>>,
     /// Fichier de persistance des compteurs (`None` = mémoire seule, pour les tests).
     quota_path: Option<std::path::PathBuf>,
+    /// Fichier de persistance des **résultats** (`None` = mémoire seule).
+    /// Sans lui, chaque redéploiement repart d'un cache vide et re-tape toutes
+    /// les API — dont celles à 10 appels/mois. Le quota était déjà protégé ;
+    /// c'est le travail déjà payé qui était jeté.
+    store_path: Option<std::path::PathBuf>,
 }
 
 impl Default for Cache {
@@ -247,8 +276,36 @@ impl Default for Cache {
             stats: Mutex::new(HashMap::new()),
             quota: Mutex::new(HashMap::new()),
             quota_path: None,
+            store_path: None,
         }
     }
+}
+
+/// Une entrée du cache telle qu'elle est écrite sur disque.
+///
+/// On persiste **l'heure d'insertion** (epoch), pas une expiration : le TTL
+/// n'est pas porté par l'entrée mais fourni par l'appelant à chaque lecture
+/// (`peek(key, ttl)`), exactement comme en mémoire où la map stocke `at` et
+/// compare `at.elapsed() < ttl`. Un `Instant` n'a aucun sens d'un processus à
+/// l'autre, d'où l'horodatage absolu.
+#[derive(Serialize, Deserialize)]
+struct StoredEntry {
+    k: String,
+    /// Insertion, en secondes depuis l'epoch Unix.
+    at: u64,
+    v: Enrichment,
+}
+
+/// Âge maximal d'une entrée persistée. Au-delà, plus aucun TTL en usage ne la
+/// considérerait valide : la relire ne ferait que gonfler le fichier.
+const MAX_PERSIST_AGE: Duration = Duration::from_secs(24 * 3600);
+
+/// Secondes depuis l'epoch Unix.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 impl Cache {
@@ -267,10 +324,47 @@ impl Cache {
     /// remettrait le compteur à zéro).
     pub fn with_data_dir(data_dir: &std::path::Path) -> Self {
         let path = data_dir.join("quota.tsv");
+        let store_path = data_dir.join("cache.jsonl");
+        let entries = load_entries(&store_path);
+        if !entries.is_empty() {
+            tracing::info!(entries = entries.len(), "cache d'enrichissement restauré");
+        }
         Self {
+            inner: Mutex::new(entries),
             quota: Mutex::new(load_quota(&path)),
             quota_path: Some(path),
+            store_path: Some(store_path),
             ..Self::default()
+        }
+    }
+
+    /// Écrit le cache sur disque. Appelé périodiquement et à l'arrêt propre.
+    /// Les entrées expirées et les **échecs** sont écartés : re-tenter une
+    /// source au redémarrage est souhaitable, re-payer un succès ne l'est pas.
+    pub fn save(&self) {
+        let Some(path) = &self.store_path else { return };
+        let now_u = unix_now();
+        let entries: Vec<StoredEntry> = {
+            let map = self.inner.lock();
+            map.iter()
+                .filter(|(_, (at, enr))| at.elapsed() < MAX_PERSIST_AGE && enr.error.is_none())
+                .map(|(k, (at, enr))| StoredEntry {
+                    k: k.clone(),
+                    at: now_u.saturating_sub(at.elapsed().as_secs()),
+                    v: enr.clone(),
+                })
+                .collect()
+        };
+        let body: String = entries
+            .iter()
+            .filter_map(|e| serde_json::to_string(e).ok())
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Écriture atomique : un kill pendant l'écriture ne doit pas laisser un
+        // fichier tronqué que le prochain démarrage lirait à moitié.
+        let tmp = path.with_extension("jsonl.tmp");
+        if std::fs::write(&tmp, body).is_ok() && std::fs::rename(&tmp, path).is_ok() {
+            tracing::debug!(entries = entries.len(), "cache d'enrichissement écrit");
         }
     }
 
@@ -442,7 +536,10 @@ impl Cache {
 
 #[cfg(test)]
 mod cache_throttle_tests {
-    use super::{Cache, PER_SOURCE_MAX, QuotaWindow, civil_year_month, is_rate_limited, quota_of};
+    use super::{
+        Cache, Enrichment, Fact, PER_SOURCE_MAX, QuotaWindow, civil_year_month, is_rate_limited,
+        quota_of,
+    };
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
 
@@ -575,6 +672,67 @@ mod cache_throttle_tests {
             "la 2e requête doit être servie du cache négatif, pas ré-appeler la source"
         );
     }
+
+    /// Un succès doit survivre au redémarrage — c'est tout l'intérêt : un
+    /// redéploiement ne doit pas re-payer des appels déjà effectués.
+    #[tokio::test]
+    async fn cache_survives_restart() {
+        let dir = std::env::temp_dir().join(format!("indic-cache-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let cache = Cache::with_data_dir(&dir);
+        let ttl = std::time::Duration::from_secs(3600);
+        let enr = Enrichment::ok("demo", vec![Fact::new("k", "v")]);
+        let got = cache.get_or("demo:x".into(), ttl, async move { enr }).await;
+        assert!(got.error.is_none());
+        cache.save();
+
+        // Nouveau processus simulé : même dossier, instance neuve.
+        let revived = Cache::with_data_dir(&dir);
+        let hit = revived
+            .get_or("demo:x".into(), ttl, async {
+                Enrichment::failed("demo", "ne doit pas être appelé".into())
+            })
+            .await;
+        assert!(
+            hit.source.contains("cache"),
+            "l'entrée doit venir du cache restauré, pas d'un nouvel appel"
+        );
+        assert!(hit.facts.iter().any(|f| f.value == "v"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Les échecs ne sont PAS persistés : au redémarrage, une source qui avait
+    /// échoué doit avoir droit à une nouvelle tentative.
+    #[tokio::test]
+    async fn failures_are_not_persisted() {
+        let dir = std::env::temp_dir().join(format!("indic-cache-err-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let cache = Cache::with_data_dir(&dir);
+        let ttl = std::time::Duration::from_secs(3600);
+        cache
+            .get_or("boom:x".into(), ttl, async {
+                Enrichment::failed("boom", "panne".into())
+            })
+            .await;
+        cache.save();
+
+        let revived = Cache::with_data_dir(&dir);
+        let retried = revived
+            .get_or("boom:x".into(), ttl, async {
+                Enrichment::ok("boom", vec![Fact::new("k", "réessayé")])
+            })
+            .await;
+        assert!(
+            !retried.source.contains("cache"),
+            "un échec ne doit pas être restauré : la source doit être re-tentée"
+        );
+        assert!(retried.facts.iter().any(|f| f.value == "réessayé"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }
 
 /// Contexte partagé passé à chaque enricher.
@@ -620,7 +778,7 @@ impl Ctx {
 }
 
 /// Un fait atomique produit par un enricher.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Fact {
     pub key: String,
     pub value: String,
@@ -636,7 +794,7 @@ impl Fact {
 }
 
 /// Un pivot = un autre observable relié (domaine↔IP↔ASN…).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pivot {
     pub relation: String,
     pub kind: String,
@@ -644,13 +802,17 @@ pub struct Pivot {
 }
 
 /// Résultat d'un enricher (une source).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Enrichment {
     pub source: String,
     pub facts: Vec<Fact>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    // `default` est indispensable, pas décoratif : `skip_serializing_if` retire
+    // le champ du JSON quand il est vide, et serde exige un `Vec` présent à la
+    // relecture. Sans lui, toute entrée sans signal ni pivot — l'immense
+    // majorité — échouait silencieusement à se recharger depuis le disque.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signals: Vec<Signal>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pivots: Vec<Pivot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,

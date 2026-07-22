@@ -78,6 +78,18 @@ function trapFocus(node) {
   if (t) { LS.set("indic_token", t); u.searchParams.delete("token"); history.replaceState(null, "", u); }
 })();
 const token = () => LS.get("indic_token", "");
+/**
+ * En-têtes d'une requête authentifiée. Le token voyage **en en-tête**, jamais
+ * en query string : une URL atterrit dans l'historique du navigateur et dans
+ * les logs d'accès du proxy (Cloudflare ici). Seuls les liens ouverts dans un
+ * onglet y échappent — une navigation ne peut pas porter d'en-tête, et c'est
+ * précisément ce que la mise en garde des réglages signale.
+ * @returns {Record<string, string>}
+ */
+function authHeaders() {
+  const t = token();
+  return t ? { "x-indic-token": t } : {};
+}
 
 /* ---------- thème ---------- */
 /** @type {ReturnType<typeof createPivotGraph> | null} */
@@ -952,7 +964,7 @@ async function loadCorrelations(query) {
   sec.hidden = true;
   if (!token()) return;   // route gated : inutile de tenter sans token
   try {
-    const r = await fetch(`/correlate?q=${encodeURIComponent(query)}&token=${encodeURIComponent(token())}`);
+    const r = await fetch(`/correlate?q=${encodeURIComponent(query)}`, { headers: authHeaders() });
     if (!r.ok) return;    // 403 sans token, 404 si l'historique est désactivé
     const list = await r.json();
     if (!Array.isArray(list) || !list.length) return;
@@ -1418,7 +1430,7 @@ async function loadSettings() {
   renderEndpoints();
   const box = $("setKeys"); box.replaceChildren(el("div", "keyempty", "Chargement…"));
   try {
-    const res = await fetch("/settings?token=" + encodeURIComponent(token()));
+    const res = await fetch("/settings", { headers: authHeaders() });
     if (res.status === 403) {
       box.replaceChildren(el("div", "keyempty", "Token requis pour afficher le statut des clés."));
       setMsg("Token invalide ou manquant.", "err");

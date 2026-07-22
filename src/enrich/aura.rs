@@ -209,6 +209,15 @@ mod tests {
         assert_eq!(e.error.as_deref(), Some("invalid API key supplied"));
     }
 
+    /// Réponse **réelle** enregistrée (voir `fixtures/README.md`).
+    #[test]
+    fn replays_recorded_response() {
+        let env: Envelope = serde_json::from_str(include_str!("fixtures/aura-known.json")).unwrap();
+        let e = build(&env);
+        assert!(e.error.is_none());
+        assert!(e.facts.iter().any(|f| f.key == "classification"));
+    }
+
     #[test]
     fn formats_the_analysis_date() {
         // 1746727082 = 2025-05-08 (UTC)

@@ -437,6 +437,37 @@ mod tests {
         );
     }
 
+    /// Réponses **réelles** enregistrées (voir `fixtures/README.md`). C'est ce
+    /// qui aurait signalé tout de suite que la doc décrit une forme que l'API
+    /// ne renvoie pas — le cas qui m'a fait réécrire ce parseur.
+    #[test]
+    fn replays_recorded_responses() {
+        let capa: Envelope =
+            serde_json::from_str(include_str!("fixtures/traceix-capa.json")).unwrap();
+        let av: Envelope = serde_json::from_str(include_str!("fixtures/traceix-av.json")).unwrap();
+        let e = build(Some(av), Some(capa), None);
+        assert!(e.error.is_none(), "les réponses réelles doivent parser");
+        assert!(
+            e.facts
+                .iter()
+                .any(|f| f.key == "att&ck" && f.value.contains("T1")),
+            "au moins une technique ATT&CK doit être extraite"
+        );
+        assert!(e.facts.iter().any(|f| f.key == "antivirus"));
+        // Échantillon du dataset public : non détecté, donc aucun signal.
+        assert!(e.signals.is_empty());
+    }
+
+    /// Réponse réelle pour un hash absent du corpus.
+    #[test]
+    fn replays_recorded_unknown_hash() {
+        let env: Envelope =
+            serde_json::from_str(include_str!("fixtures/traceix-unknown.json")).unwrap();
+        let e = build(None, Some(env), None);
+        assert!(e.error.is_none(), "un hash inconnu n'est pas une panne");
+        assert!(e.facts.iter().any(|f| f.value == "hash inconnu"));
+    }
+
     /// L'endpoint YARA répond `data` au lieu de `results` : `post()` normalise,
     /// on vérifie ici que le nom de règle est bien extrait.
     #[test]

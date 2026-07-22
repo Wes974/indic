@@ -137,6 +137,15 @@ mod tests {
         assert!(l[0].contains("avast_decryptor_akira"));
     }
 
+    /// Réponse **réelle** enregistrée pour « akira » (voir `fixtures/README.md`).
+    #[test]
+    fn replays_recorded_response() {
+        let v: Value = serde_json::from_str(include_str!("fixtures/decryptor-akira.json")).unwrap();
+        let l = links(v);
+        assert_eq!(l.len(), 1, "un décrypteur attendu pour akira");
+        assert!(l[0].starts_with("https://"));
+    }
+
     /// Réponse réelle pour « 8base » : la base ne connaît rien. `results` peut
     /// être absent, nul ou vide — les trois doivent donner « aucun lien ».
     #[test]

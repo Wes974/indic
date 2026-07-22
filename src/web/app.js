@@ -1453,6 +1453,10 @@ function renderExtract(out, iocs) {
   const s = el("div", "exSum");
   s.append(el("b", null, String(iocs.length)),
            el("span", null, ` IOC · ${types.length} type${types.length > 1 ? "s" : ""} · cliquez pour analyser`));
+  // Cliquer 40 chips une par une n'avait aucun sens : /lookup/bulk existait déjà.
+  const all = el("button", "ghost bulkGo", `Tout analyser (${iocs.length})`);
+  all.onclick = () => analyseAll(iocs.map((i) => i.value), all, out);
+  s.append(all);
   out.append(s);
   for (const t of types) {
     const g = el("div", "exGrp");
@@ -1471,6 +1475,62 @@ function renderExtract(out, iocs) {
     out.append(g);
   }
 }
+/* Analyse en lot des IOC extraits. `/lookup/bulk` plafonne à 20 par appel :
+   on découpe, et on affiche au fur et à mesure plutôt que d'attendre la fin —
+   sur 40 IOC la première fournée arrive en quelques secondes. */
+const BULK_MAX = 20;
+async function analyseAll(values, btn, out) {
+  btn.disabled = true;
+  const table = el("div", "bulkTbl");
+  const head = el("div", "bulkRow bulkHead");
+  head.append(el("span", null, "Observable"), el("span", null, "Type"), el("span", null, "Verdict"));
+  table.append(head);
+  out.replaceChildren(el("div", "exSum", `Analyse de ${values.length} observables…`), table);
+
+  let done = 0;
+  for (let i = 0; i < values.length; i += BULK_MAX) {
+    const chunk = values.slice(i, i + BULK_MAX);
+    try {
+      const payload = { queries: chunk };
+      if (token()) payload.token = token();
+      const r = await fetch("/lookup/bulk", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json();
+      for (const res of d.results || []) {
+        const row = el("button", "bulkRow");
+        row.append(el("span", "bulkQ", trunc(res.query, 40)));
+        row.append(el("span", "bulkK", res.kind || "—"));
+        const v = res.verdict?.label;
+        const m = VERDICT_META[v];
+        const pill = el("span", "bulkV");
+        if (m) {
+          pill.style.color = `var(--h-${m.hue})`;
+          pill.style.background = `var(--hbg-${m.hue})`;
+          pill.style.borderColor = `var(--hbd-${m.hue})`;
+          pill.textContent = m.label;
+        } else {
+          pill.textContent = res.ok ? "—" : "non reconnu";
+          pill.classList.add("nil");
+        }
+        row.append(pill);
+        row.onclick = () => { closeExtractor(); go(res.query); };
+        row.title = `Analyser ${res.query}`;
+        table.append(row);
+      }
+    } catch {
+      table.append(el("div", "cmpErr", "Erreur réseau sur un lot"));
+    }
+    done += chunk.length;
+    const sum = out.querySelector(".exSum");
+    if (sum) sum.textContent = done < values.length
+      ? `Analyse… ${done}/${values.length}`
+      : `${values.length} observables analysés · cliquez pour ouvrir la fiche`;
+  }
+  btn.disabled = false;
+}
+
 async function doExtract() {
   const txt = $area("exText").value.trim();
   const out = $("exOut"), btn = $btn("exGo");

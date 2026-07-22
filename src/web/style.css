@@ -529,6 +529,28 @@ footer {
 .keyitem.no .kname { color: var(--ink3); }
 .keyempty { font: 400 12px/1.5 var(--sans); color: var(--ink3); font-style: italic; }
 
+/* ── extracteur : analyse en lot ── */
+.exSum { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.bulkGo { margin-left: auto; }
+.bulkTbl { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; margin-top: 12px;
+  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.bulkRow { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center;
+  gap: 10px; padding: 7px 12px; border-top: 1px solid var(--line); background: var(--card2);
+  text-align: left; cursor: pointer; border-left: 0; border-right: 0; border-bottom: 0; }
+.bulkRow:first-child { border-top: none; }
+button.bulkRow:hover { background: var(--card); }
+.bulkHead { background: var(--card); cursor: default;
+  font: 600 9.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
+.bulkQ { font: 500 12px/1.3 var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bulkK { font: 400 11px/1 var(--mono); color: var(--ink3); }
+.bulkV { font: 500 11px/1 var(--mono); border: 1px solid var(--line2); border-radius: 12px;
+  padding: 4px 10px; white-space: nowrap; }
+.bulkV.nil { color: var(--ink3); }
+@supports not (grid-template-columns: subgrid) {
+  .bulkTbl { display: flex; flex-direction: column; }
+  .bulkRow { grid-template-columns: minmax(0, 1fr) auto auto; }
+}
+
 /* ── réglages : santé des sources ── */
 .srcSum { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 10px; }
 .srcCount { font: 400 12px/1 var(--mono); color: var(--ink3); }

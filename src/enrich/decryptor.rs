@@ -41,7 +41,17 @@ pub async fn enrich_crypto(addr: &str, ctx: &Ctx) -> Enrichment {
     };
     drop(store);
 
-    match fetch(ctx, &family).await {
+    // Les familles de Ransomwhere portent une version ou un alias (« LockBit
+    // 2.0 », « Netwalker (Mailto) ») que la base de décrypteurs ne connaît pas :
+    // elle indexe le nom nu. Constaté en test — « lockbit » rend le portail
+    // IC3, « lockbit 2.0 » ne rend rien. On tente l'exact, puis le nom nu.
+    let base = base_name(&family);
+    let mut links = fetch(ctx, &family).await;
+    if base != family.to_ascii_lowercase() && links.as_ref().is_ok_and(Vec::is_empty) {
+        links = fetch(ctx, &base).await;
+    }
+
+    match links {
         Ok(links) if !links.is_empty() => {
             let mut facts = vec![
                 Fact::new("famille", family.clone()),
@@ -63,6 +73,24 @@ pub async fn enrich_crypto(addr: &str, ctx: &Ctx) -> Enrichment {
         ),
         Err(e) => Enrichment::failed("decryptor", format!("{e:#}")),
     }
+}
+
+/// Nom de famille « nu » : sans alias entre parenthèses ni suffixe de version.
+/// « LockBit 2.0 » → `lockbit`, « Netwalker (Mailto) » → `netwalker`.
+fn base_name(family: &str) -> String {
+    family
+        .split('(')
+        .next()
+        .unwrap_or(family)
+        .split_whitespace()
+        // Coupe au premier segment qui ressemble à une version (2, 2.0, v3).
+        .take_while(|t| {
+            let t = t.trim_start_matches(['v', 'V']);
+            !t.chars().next().is_some_and(|c| c.is_ascii_digit())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
 }
 
 async fn fetch(ctx: &Ctx, family: &str) -> Result<Vec<String>> {
@@ -116,6 +144,18 @@ mod tests {
         assert!(links(json!({})).is_empty());
         assert!(links(json!({ "results": null })).is_empty());
         assert!(links(json!({ "results": [] })).is_empty());
+    }
+
+    /// Constaté en production : la base de décrypteurs indexe le nom nu, pas
+    /// celui de Ransomwhere. Sans ce repli, LockBit et Netwalker ne trouvaient
+    /// rien alors qu'un lien existe.
+    #[test]
+    fn strips_version_and_alias_from_family() {
+        assert_eq!(base_name("LockBit 2.0"), "lockbit");
+        assert_eq!(base_name("Netwalker (Mailto)"), "netwalker");
+        assert_eq!(base_name("Akira"), "akira");
+        assert_eq!(base_name("Conti"), "conti");
+        assert_eq!(base_name("REvil v2"), "revil");
     }
 
     /// Les entrées non-URL sont écartées : la fiche ne doit pas proposer de

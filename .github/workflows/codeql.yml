@@ -1,0 +1,42 @@
+name: CodeQL
+
+# Analyse statique GitHub. Sur un dépôt public c'est gratuit, et pour un outil
+# de sécurité c'est la moindre des choses : les résultats atterrissent dans
+# l'onglet Security, pas dans les logs de CI.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Lundi 04:27 UTC — les requêtes CodeQL évoluent, un dépôt inchangé peut
+    # révéler de nouveaux résultats sans qu'aucun commit ne soit poussé.
+    - cron: "27 4 * * 1"
+
+jobs:
+  analyze:
+    name: Analyse (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # `build-mode: none` : Rust comme JS/TS s'extraient sans compilation,
+        # inutile de refaire un cargo build ici — le job `check` s'en charge.
+        language: [rust, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Initialisation
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

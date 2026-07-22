@@ -570,7 +570,7 @@ button.bulkRow:hover { background: var(--card); }
 .srcCount { font: 400 12px/1 var(--mono); color: var(--ink3); }
 .srcCount b { font-weight: 700; font-size: 14px; }
 #setSources {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto auto;
   border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
   max-height: 320px; overflow-y: auto;
 }
@@ -588,10 +588,13 @@ button.bulkRow:hover { background: var(--card); }
 .srcQuota { font: 400 11px/1 var(--mono); color: var(--ink3); white-space: nowrap; }
 .srcQuota.full { color: var(--h-amber); }
 .srcStats { font: 400 11px/1 var(--mono); color: var(--ink3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.srcSig { font: 400 11px/1 var(--mono); color: var(--ink3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Souvent seule à crier : candidate à une pondération à la baisse. */
+.srcSig.noisy { color: var(--h-amber); }
 .srcErr { grid-column: 2 / -1; font: 400 11px/1.4 var(--mono); color: var(--h-red); word-break: break-word; }
 @supports not (grid-template-columns: subgrid) {
   #setSources { display: flex; flex-direction: column; }
-  .srcRow { grid-template-columns: auto minmax(0, 1fr) auto auto auto; }
+  .srcRow { grid-template-columns: auto minmax(0, 1fr) auto auto auto auto; }
 }
 
 /* ── réglages : endpoints ── */

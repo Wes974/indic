@@ -1423,6 +1423,19 @@ function renderSources(list) {
       : "—";
     row.append(stats);
 
+    // Combien de fois cette source a crié, et combien de fois elle était seule.
+    // Un ratio élevé désigne une source bruyante : c'est la donnée qui manque
+    // pour pondérer les sources sur des mesures plutôt que sur une intuition.
+    const sig = el("span", "srcSig");
+    if (s.sig_serious) {
+      const pct = Math.round((s.sig_lone / s.sig_serious) * 100);
+      sig.textContent = `${s.sig_serious} sig · ${s.sig_lone} seul (${pct} %)`;
+      if (s.sig_serious >= 5 && pct >= 80) sig.classList.add("noisy");
+      sig.title = "Signaux sérieux émis, dont ceux où cette source était la seule "
+        + "à en émettre. Une source souvent seule est probablement bruyante.";
+    }
+    row.append(sig);
+
     // L'erreur occupe toute la largeur : c'est l'information qu'on vient chercher.
     if (s.last_error) {
       const e = el("div", "srcErr", trunc(s.last_error, 150));

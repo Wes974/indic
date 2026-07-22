@@ -398,6 +398,8 @@ async fn settings(
                 "err": m.map(|m| m.err).unwrap_or(0),
                 "cache_hit": m.map(|m| m.cache_hit).unwrap_or(0),
                 "avg_latency_ms": m.map(|m| m.avg_latency_ms).unwrap_or(0),
+                "sig_serious": m.map(|m| m.sig_serious).unwrap_or(0),
+                "sig_lone": m.map(|m| m.sig_lone).unwrap_or(0),
                 "last_error": m.and_then(|m| m.last_error.clone()),
             });
             if let Some((used, limit, unit)) = ctx.cache.quota_state(name) {

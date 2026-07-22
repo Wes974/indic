@@ -57,6 +57,22 @@ impl Trust {
     }
 }
 
+/// Sources ayant émis au moins un signal « sérieux » (poids ≥ 3), dédupliquées.
+/// Exposé pour l'instrumentation : le seuil de corroboration ne doit être défini
+/// qu'ici, sinon la mesure et le verdict divergent silencieusement.
+pub fn serious_sources(signals: &[Signal]) -> Vec<String> {
+    let mut by_source: BTreeMap<&str, i32> = BTreeMap::new();
+    for s in signals {
+        let slot = by_source.entry(s.source.as_str()).or_insert(0);
+        *slot = (*slot).max(category_weight(&s.category));
+    }
+    by_source
+        .into_iter()
+        .filter(|(_, w)| *w >= 3)
+        .map(|(s, _)| s.to_string())
+        .collect()
+}
+
 /// Calcule le verdict à partir des signaux et de la confiance dans l'observable.
 /// La **corroboration** prime : une seule source ne suffit pas à condamner (les
 /// feeds ont des FP — placeholders, sinkholes, hébergement), il faut plusieurs
@@ -562,5 +578,25 @@ mod tests {
         assert!(is_public_resolver(
             "2606:4700:4700:0000:0000:0000:0000:1111"
         ));
+    }
+
+    /// La mesure et le verdict doivent partager la même définition de « source
+    /// sérieuse » : deux seuils divergents rendraient l'instrumentation
+    /// trompeuse au moment précis où on s'en servirait pour pondérer.
+    #[test]
+    fn serious_sources_matches_the_verdict_threshold() {
+        let sigs = [
+            sig("ipdata", "malicious"), // poids 3 → sérieuse
+            sig("dshield", "threat"),   // poids 2 → non
+            sig("misp", "threat"),      // poids 2 → non
+            sig("feodo", "c2"),         // poids 5 → sérieuse
+            sig("x", "info"),           // poids 0 → non
+        ];
+        assert_eq!(serious_sources(&sigs), vec!["feodo", "ipdata"]);
+
+        // Cas du faux positif isolé : une seule source sérieuse, celle qu'on
+        // veut justement repérer comme bruyante.
+        let lone = [sig("ipdata", "malicious"), sig("dshield", "threat")];
+        assert_eq!(serious_sources(&lone), vec!["ipdata"]);
     }
 }

@@ -241,6 +241,12 @@ struct SourceStat {
     neg_hit: AtomicU64,
     calls: AtomicU64,
     latency_ms_sum: AtomicU64,
+    /// Signaux « sérieux » (poids ≥ 3) émis par cette source.
+    sig_serious: AtomicU64,
+    /// Fois où cette source était **la seule** à crier au loup sur un lookup.
+    /// Un ratio élevé désigne une source bruyante — c'est la donnée qui
+    /// manquait pour pondérer les sources autrement qu'à l'intuition.
+    sig_lone: AtomicU64,
     /// Dernier message d'erreur observé. Sans lui, savoir *pourquoi* une source
     /// est en panne impose de relancer un lookup et d'éplucher la réponse —
     /// c'est comme ça que fofa et zoomeye sont restés cassés sans qu'on le voie.
@@ -257,6 +263,8 @@ pub struct SourceMetric {
     pub neg_hit: u64,
     pub calls: u64,
     pub avg_latency_ms: u64,
+    pub sig_serious: u64,
+    pub sig_lone: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
 }
@@ -428,6 +436,16 @@ impl Cache {
             .clone()
     }
 
+    /// Enregistre qu'une source a émis un signal sérieux, et si elle était
+    /// seule à le faire. Appelé une fois par lookup, après calcul du verdict.
+    pub fn note_serious(&self, source: &str, lone: bool) {
+        let stat = self.stat(source);
+        stat.sig_serious.fetch_add(1, Ordering::Relaxed);
+        if lone {
+            stat.sig_lone.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     /// Quota local consommé pour une source, sur la fenêtre en cours.
     /// `None` = pas de plafond déclaré pour cette source.
     pub fn quota_state(&self, source: &str) -> Option<(u32, u32, &'static str)> {
@@ -464,6 +482,8 @@ impl Cache {
                         .load(Ordering::Relaxed)
                         .checked_div(calls)
                         .unwrap_or(0),
+                    sig_serious: s.sig_serious.load(Ordering::Relaxed),
+                    sig_lone: s.sig_lone.load(Ordering::Relaxed),
                     last_error: s.last_error.lock().clone(),
                 }
             })
@@ -1043,6 +1063,14 @@ pub async fn run(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) -> 
         .collect();
     if let Some(r) = &report.ip {
         signals.extend(r.signals.iter().cloned());
+    }
+    // Instrumentation : qui crie, et qui crie seul. Mesurer avant de pondérer —
+    // une table de fiabilité bâtie sur une intuition ne vaut pas mieux que le
+    // problème qu'elle prétend corriger.
+    let serious = crate::verdict::serious_sources(&signals);
+    let lone = serious.len() == 1;
+    for src in &serious {
+        ctx.cache.note_serious(src, lone);
     }
     let v = crate::verdict::compute(&signals, trust);
     // Exposé pour les types à dimension menace (verdict « clean » rassurant sur

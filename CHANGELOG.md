@@ -2,7 +2,10 @@
 
 All notable changes to indic.
 
-## [Unreleased]
+## [0.3.1] — 2026-07-23
+
+Patch de calibrage du verdict : à qui l'outil accorde le bénéfice du doute, et
+l'instrumentation qui dira un jour combien peser chaque source.
 
 ### Added
 - **Mesure du bruit par source** : compteurs de signaux « sérieux » émis et de

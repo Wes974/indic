@@ -4,6 +4,12 @@ All notable changes to indic.
 
 ## [Unreleased]
 
+### Added
+- **Mesure du bruit par source** : compteurs de signaux « sérieux » émis et de
+  fois où la source était la **seule** à en émettre. Exposé par `/settings` et
+  affiché dans le panneau de santé. Préalable assumé à toute pondération par
+  source — mesurer avant de décider plutôt que d'inventer des coefficients.
+
 ### Fixed
 - **Resolvers DNS publics classés « suspect »** : `1.1.1.1` ressortait suspect
   parce qu'ipdata l'annonce `malicious`, alors qu'un resolver figure dans les

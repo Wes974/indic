@@ -60,6 +60,7 @@ pub(crate) mod securitytrails;
 pub(crate) mod shodan;
 pub(crate) mod stopforumspam;
 pub(crate) mod threatfox;
+pub(crate) mod traceix;
 pub(crate) mod triage;
 pub(crate) mod url_analysis;
 pub(crate) mod urlhaus;

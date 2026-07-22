@@ -15,8 +15,8 @@ use crate::enrich::{
     ipinfo, ipqs, leakix, malshare, maltiverse, malwarebazaar, maxmind, metadefender, misp, netlas,
     onion, onyphe, opentip, osv, otx, phone, poc, proxycheck, pulsedive, quake, rdap, rdap_domain,
     rdns, ripestat, safebrowsing, scamalytics, securitytrails, shodan, stopforumspam, threatfox,
-    triage, url_analysis, urlhaus, urlscan, urlscan_pro, username, validin, virustotal, vpnapi,
-    vulncheck, vulners, wayback, zoomeye,
+    traceix, triage, url_analysis, urlhaus, urlscan, urlscan_pro, username, validin, virustotal,
+    vpnapi, vulncheck, vulners, wayback, zoomeye,
 };
 
 // ── TTL constants (mirrored from enrich.rs) ──────────────────────────────
@@ -1059,6 +1059,21 @@ pub fn build() -> Registry {
         |obs, ctx| async move {
             match obs {
                 Observable::Hash(h) => malshare::enrich_hash(&h, ctx).await,
+                _ => unreachable!(),
+            }
+        }
+    );
+    enricher!(
+        reg,
+        Traceix,
+        "traceix",
+        Some("TRACEIX_API_KEY"),
+        Observable::Hash(_),
+        TTL_HASH,
+        false,
+        |obs, ctx| async move {
+            match obs {
+                Observable::Hash(h) => traceix::enrich_hash(&h, ctx).await,
                 _ => unreachable!(),
             }
         }

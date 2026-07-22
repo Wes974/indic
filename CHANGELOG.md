@@ -13,6 +13,12 @@ All notable changes to indic.
   pas les IP de CDN, qui hébergent réellement du contenu malveillant.
   Contrairement au prior domaine, celui-ci est évalué **après** le test de
   corroboration : trois sources sérieuses l'emportent toujours.
+- **Un prior de confiance n'immunisait plus rien** : `trust == Domain`
+  court-circuitait vers `clean` avant le test de corroboration, donc aucun
+  nombre de sources ne pouvait condamner un domaine du top-100k — précisément
+  la population qui se fait compromettre. Les deux priors cèdent désormais
+  devant quatre sources sérieuses indépendantes. Le cas `github.com` du README
+  (2 sources visant du contenu hébergé) reste « propre », verrouillé par un test.
 
 
 ## [0.3.0] — 2026-07-22

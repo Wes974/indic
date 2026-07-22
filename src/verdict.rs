@@ -80,9 +80,31 @@ pub fn compute(signals: &[Signal], trust: Trust) -> Verdict {
     let pop_bonus = if trusted { 8 } else { 0 };
     let score = raw - pop_bonus;
 
-    let (label, rationale): (&'static str, String) = if trust == Trust::Domain && raw > 0 {
-        // Un domaine majeur est innocenté sans condition : les IOC portent sur
-        // ce qu'il héberge, pas sur lui. Comportement historique, inchangé.
+    // Un prior de confiance n'est pas un blanc-seing : il cède devant un
+    // faisceau large. Seuils relevés d'un cran pour un observable de confiance
+    // — un domaine majeur héberge du contenu tiers, ce qui explique légitimement
+    // quelques signaux, mais pas quatre sources indépendantes qui le désignent
+    // *lui*. C'est le cas du site populaire compromis : le raisonnement « les
+    // IOC portent sur ce qu'il héberge » devient faux dès qu'il est la cible.
+    let condemn = if trusted { 4 } else { 3 };
+    let condemn_c2 = if trusted { 3 } else { 2 };
+
+    let (label, rationale): (&'static str, String) = if serious >= condemn
+        || (has_c2 && serious >= condemn_c2)
+    {
+        (
+            "malicious",
+            if trusted {
+                format!(
+                    "Menace corroborée par {serious} sources indépendantes (poids {raw}) — \
+                     faisceau trop large pour être imputé au seul contenu hébergé, le prior \
+                     de confiance ne tient pas."
+                )
+            } else {
+                format!("Menace corroborée par {serious} sources indépendantes (poids {raw}).")
+            },
+        )
+    } else if trust == Trust::Domain && raw > 0 {
         (
             "clean",
             format!(
@@ -91,23 +113,13 @@ pub fn compute(signals: &[Signal], trust: Trust) -> Verdict {
                  référencés, pas sur le domaine lui-même."
             ),
         )
-    } else if serious >= 3 || (has_c2 && serious >= 2) {
-        (
-            "malicious",
-            format!("Menace corroborée par {serious} sources indépendantes (poids {raw})."),
-        )
     } else if trust == Trust::Resolver && raw > 0 {
-        // Placé **après** le test de corroboration, à la différence du prior
-        // domaine : un resolver reconnu par trois sources sérieuses reste
-        // malveillant. Le prior neutralise le « une source dit malicious donc
-        // suspect », pas un faisceau concordant.
         (
             "clean",
             format!(
                 "Signaux présents (poids {raw}) mais resolver DNS public identifié — ces \
                  adresses figurent dans les journaux de tout le monde, victimes comprises, \
-                 ce qui les fait remonter dans les feeds d'abus. Un faisceau corroboré \
-                 l'emporterait sur ce prior."
+                 ce qui les fait remonter dans les feeds d'abus."
             ),
         )
     } else if serious >= 2 || has_c2 {
@@ -472,19 +484,63 @@ mod tests {
         );
     }
 
-    /// Le prior atténue, il n'immunise pas : trois sources sérieuses
-    /// l'emportent toujours.
+    /// Un prior n'est pas un blanc-seing : au-delà de quatre sources sérieuses
+    /// indépendantes, il cède — que ce soit un domaine majeur ou un resolver.
     #[test]
-    fn the_prior_does_not_make_a_resolver_untouchable() {
-        let sigs = [
-            sig("a", "malicious"),
-            sig("b", "phishing"),
-            sig("c", "compromised"),
-        ];
-        assert_eq!(compute(&sigs, Trust::Resolver).label, "malicious");
+    fn the_prior_yields_to_a_broad_consensus() {
+        let four: Vec<Signal> = ["a", "b", "c", "d"]
+            .iter()
+            .map(|s| sig(s, "malicious"))
+            .collect();
+        assert_eq!(compute(&four, Trust::Resolver).label, "malicious");
+        assert_eq!(compute(&four, Trust::Domain).label, "malicious");
+        assert!(
+            compute(&four, Trust::Domain)
+                .rationale
+                .contains("ne tient pas"),
+            "le texte doit dire que le prior a cédé, pas condamner sans expliquer"
+        );
+
+        // Trois sources : le prior tient encore, des deux côtés.
+        let three: Vec<Signal> = ["a", "b", "c"]
+            .iter()
+            .map(|s| sig(s, "malicious"))
+            .collect();
+        assert_eq!(compute(&three, Trust::Resolver).label, "clean");
+        assert_eq!(compute(&three, Trust::Domain).label, "clean");
+        // Sans prior, trois sources suffisent : c'est bien le prior qui agit.
+        assert_eq!(compute(&three, Trust::None).label, "malicious");
     }
 
-    /// Périmètre volontairement étroit : les adresses de résolution seulement.
+    /// **Régression.** Avant correction, `trust == Domain` court-circuitait vers
+    /// `clean` avant le test de corroboration : aucun nombre de sources ne
+    /// pouvait condamner un domaine du top-100k. C'est précisément la population
+    /// qui se fait compromettre — un site populaire servant une charge après
+    /// compromission ressortait « Propre ».
+    #[test]
+    fn a_compromised_popular_domain_is_no_longer_whitewashed() {
+        let sigs: Vec<Signal> = ["urlhaus", "threatfox", "safebrowsing", "virustotal", "otx"]
+            .iter()
+            .map(|s| sig(s, "malicious"))
+            .collect();
+        assert_eq!(compute(&sigs, Trust::Domain).label, "malicious");
+    }
+
+    /// Le cas de référence du README doit rester intact : `github.com` porte des
+    /// signaux qui visent du contenu hébergé (2 sources sérieuses), pas le
+    /// domaine. Il reste « propre ».
+    #[test]
+    fn github_style_hosted_content_stays_clean() {
+        let sigs = [
+            sig("hudsonrock", "infostealer"),
+            sig("threatfox", "malicious"),
+            sig("urlhaus", "malicious"),
+            sig("github", "exposure"),
+        ];
+        assert_eq!(compute(&sigs, Trust::Domain).label, "clean");
+    }
+
+    /// Périmètre volontairement étroit    /// Périmètre volontairement étroit : les adresses de résolution seulement.
     /// Une IP de CDN Cloudflare héberge réellement du contenu malveillant, ses
     /// signaux sont légitimes et ne doivent pas être atténués.
     #[test]

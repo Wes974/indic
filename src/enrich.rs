@@ -596,6 +596,11 @@ pub struct Ctx {
     pub attack_map: crate::attack::AttackMap,
     /// Registre des enrichers (construit au démarrage, jamais muté après).
     pub registry: Arc<Registry>,
+    /// Sources désactivées à la main (`INDIC_DISABLED_SOURCES`), par nom
+    /// d'enricher. Volontairement distinct de l'absence de clé : retirer une
+    /// clé du `.env` désactive aussi la source, mais mélange l'identifiant et
+    /// l'intention — et ne permet pas de couper une source *sans* clé.
+    pub disabled: std::collections::HashSet<String>,
 }
 
 impl Ctx {
@@ -724,11 +729,15 @@ impl Registry {
             .collect()
     }
 
-    /// Vrai si au moins un enricher applicable a sa clé configurée.
+    /// Vrai si au moins un enricher applicable a sa clé configurée. Ignore les
+    /// sources désactivées : sinon un lookup non authentifié afficherait
+    /// « des enrichers à clé nécessitent un token » alors qu'aucun ne tournerait.
     pub fn has_keyed_for(&self, obs: &Observable, ctx: &Ctx) -> bool {
-        self.entries
-            .iter()
-            .any(|e| e.applicable(obs) && e.key_name().is_some_and(|k| ctx.key(k).is_some()))
+        self.entries.iter().any(|e| {
+            e.applicable(obs)
+                && !ctx.disabled.contains(e.name())
+                && e.key_name().is_some_and(|k| ctx.key(k).is_some())
+        })
     }
 }
 
@@ -955,7 +964,14 @@ async fn dispatch(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) ->
 /// - Keyed : exécutés seulement si `authorized` ET la clé est présente.
 /// - IPv4-only : ignorés sur IPv6.
 async fn run_enrichers(obs: &Observable, ctx: &Ctx, authorized: bool) -> Vec<Enrichment> {
-    let candidates = ctx.registry.for_obs(obs);
+    // Filtré ici plutôt qu'au moment du résultat : une source désactivée ne doit
+    // pas être appelée du tout — ni latence, ni quota consommé, ni ligne d'erreur.
+    let candidates: Vec<_> = ctx
+        .registry
+        .for_obs(obs)
+        .into_iter()
+        .filter(|e| !ctx.disabled.contains(e.name()))
+        .collect();
     let (keyless, keyed): (Vec<_>, Vec<_>) =
         candidates.into_iter().partition(|e| e.key_name().is_none());
 

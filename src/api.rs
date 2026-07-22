@@ -360,11 +360,17 @@ async fn settings(
         .map(|k| (k.to_string(), json!(ctx.key(k).is_some())))
         .collect();
     let configured = keys.values().filter(|v| v.as_bool() == Some(true)).count();
+    // Exposé pour que l'UI distingue « source absente » de « source coupée
+    // volontairement » — sans ça, une source désactivée devient invisible et on
+    // se demande six mois plus tard pourquoi elle ne répond plus.
+    let mut disabled: Vec<&str> = ctx.disabled.iter().map(String::as_str).collect();
+    disabled.sort_unstable();
     Json(json!({
         "token_required": ctx.token.is_some(),
         "keys_total": crate::KNOWN_KEYS.len(),
         "keys_configured": configured,
         "feed_version": crate::feeds::FEED_VERSION,
+        "disabled_sources": disabled,
         "keys": keys,
     }))
     .into_response()

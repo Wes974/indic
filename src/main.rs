@@ -192,6 +192,19 @@ fn build_ctx(cfg: &Config) -> Result<Arc<enrich::Ctx>> {
     };
     let attack_map = attack::load_attack_map(&cfg.data_dir.join("cwe2attack.csv"));
     let registry = Arc::new(registry::build());
+    // `INDIC_DISABLED_SOURCES=fofa,zoomeye` — coupe des sources sans toucher à
+    // leurs clés (quota épuisé, source cassée, résultats non souhaités).
+    let disabled: std::collections::HashSet<String> = std::env::var("INDIC_DISABLED_SOURCES")
+        .unwrap_or_default()
+        .split(',')
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if !disabled.is_empty() {
+        let mut names: Vec<&str> = disabled.iter().map(String::as_str).collect();
+        names.sort_unstable();
+        tracing::info!(sources = names.join(","), "sources désactivées");
+    }
     Ok(Arc::new(enrich::Ctx {
         store,
         http,
@@ -204,6 +217,7 @@ fn build_ctx(cfg: &Config) -> Result<Arc<enrich::Ctx>> {
         rate_limiter: rate::RateLimiter::new(),
         registry,
         attack_map,
+        disabled,
     }))
 }
 

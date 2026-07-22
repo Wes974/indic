@@ -14,13 +14,21 @@ use crate::enrich;
 use crate::store::Store;
 
 fn test_ctx() -> Arc<enrich::Ctx> {
+    ctx_with(HashMap::new(), Default::default())
+}
+
+/// Contexte de test paramétrable : clés API présentes, sources désactivées.
+fn ctx_with(
+    keys: HashMap<String, String>,
+    disabled: std::collections::HashSet<String>,
+) -> Arc<enrich::Ctx> {
     let store = Arc::new(ArcSwap::from_pointee(Store::default()));
     let http = reqwest::Client::builder()
         .user_agent("indic-test/0.1")
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap();
-    let keys = parking_lot::RwLock::new(HashMap::new());
+    let keys = parking_lot::RwLock::new(keys);
     let registry = Arc::new(crate::registry::build());
     let attack_map = HashMap::new();
     Arc::new(enrich::Ctx {
@@ -33,6 +41,7 @@ fn test_ctx() -> Arc<enrich::Ctx> {
         rate_limiter: crate::rate::RateLimiter::new(),
         attack_map,
         registry,
+        disabled,
     })
 }
 
@@ -50,6 +59,15 @@ async fn json_body(response: axum::response::Response) -> Value {
 async fn get(uri: &str) -> (StatusCode, Value) {
     let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
     let response = app().oneshot(req).await.unwrap();
+    let status = response.status();
+    let body = json_body(response).await;
+    (status, body)
+}
+
+/// Comme `get`, mais sur un routeur fourni (contexte de test personnalisé).
+async fn get_with(router: axum::Router, uri: &str) -> (StatusCode, Value) {
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let response = router.oneshot(req).await.unwrap();
     let status = response.status();
     let body = json_body(response).await;
     (status, body)
@@ -352,4 +370,35 @@ async fn push_endpoint_accessible() {
     // Push peut échouer (pas de MISP configuré) mais ne doit pas paniquer.
     let status = response.status();
     assert!(status.is_success() || status.is_server_error() || status.is_client_error());
+}
+
+#[tokio::test]
+async fn disabled_source_is_not_considered_keyed() {
+    use crate::observable::Observable;
+    let obs = Observable::detect("8.8.8.8").expect("ip");
+    let keys = HashMap::from([("ABUSEIPDB_API_KEY".to_string(), "x".to_string())]);
+
+    // Clé présente et source active → l'observable a bien un enricher à clé.
+    let ctx = ctx_with(keys.clone(), Default::default());
+    assert!(ctx.registry.has_keyed_for(&obs, &ctx));
+
+    // Même clé, mais source désactivée → elle ne compte plus. Sans ce filtre,
+    // un lookup non authentifié annoncerait « des enrichers à clé nécessitent
+    // un token » alors qu'aucun ne tournerait.
+    let ctx = ctx_with(
+        keys,
+        std::collections::HashSet::from(["abuseipdb".to_string()]),
+    );
+    assert!(!ctx.registry.has_keyed_for(&obs, &ctx));
+}
+
+#[tokio::test]
+async fn settings_exposes_disabled_sources() {
+    let ctx = ctx_with(
+        HashMap::new(),
+        std::collections::HashSet::from(["fofa".to_string(), "zoomeye".to_string()]),
+    );
+    let (status, body) = get_with(api::router(ctx), "/settings").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["disabled_sources"], json!(["fofa", "zoomeye"]));
 }

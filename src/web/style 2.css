@@ -218,7 +218,6 @@ button.chip { cursor: pointer; transition: border-color .15s, color .15s; }
 /* barre de filtres signaux */
 .sbar { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .chp { font: 400 12px/1 var(--sans); color: var(--ink3); background: var(--card2); border: 1px solid var(--line2); border-radius: 14px; padding: 4px 12px; cursor: pointer; transition: .15s; }
-.chp[hidden] { display: none; }   /* sinon le display du bouton écrase [hidden] */
 .chp:hover { border-color: var(--accent-bd); color: var(--ink2); }
 .chp--active { background: var(--accent-bg); border-color: var(--accent-bd); color: var(--accent); font-weight: 600; }
 .fcnt { font-size: 10px; opacity: .65; margin-left: 2px; }
@@ -272,9 +271,6 @@ h1.obs {
   padding: 5px 10px; transition: color .15s, border-color .15s;
 }
 .ghost:hover { color: var(--accent); border-color: var(--accent-bd); }
-/* action principale de la fiche : comparer part toujours de l'observable affiché */
-.ghost--cmp { display: inline-flex; align-items: center; gap: 6px; color: var(--ink2); }
-.ghost--cmp svg { width: 13px; height: 13px; }
 
 /* ================= stat tiles ================= */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; margin-top: 20px; }
@@ -319,11 +315,13 @@ h1.obs {
 .lkinds { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex-basis: 100%; padding: 4px 0 0; }
 .lkinds .llbl { font: 400 10px/1 var(--sans); color: var(--ink3); text-transform: uppercase; letter-spacing: .08em; margin-right: 4px; }
 .lchip { font: 500 12px/1 var(--sans); padding: 3px 10px; border-radius: 12px; border: 1px solid transparent; white-space: nowrap; }
-/* ligne d'intro : baseline commune entre le texte et l'entrée de l'extracteur */
-.lintrorow { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
-#landing .lintrorow .lintro { margin: 0; }
-.lextract { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; }
-.lextract svg { width: 14px; height: 14px; }
+/* IOC extractor */
+.iocex { margin-bottom: 20px; }
+.iocex textarea { width: 100%; box-sizing: border-box; background: var(--card); border: 1px solid var(--line2); border-radius: 10px; padding: 12px 14px; color: var(--ink); font: 400 13px/1.5 var(--sans); resize: vertical; }
+.iocex textarea:focus { border-color: var(--accent-bd); outline: none; }
+.iocex .ghost { margin-top: 8px; }
+.iocex .iocout { margin-top: 10px; gap: 6px; }
+.iocnone { font: 400 12px var(--sans); color: var(--ink3); }
 .lgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; align-items: start; }
 .lcard { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; box-shadow: var(--shadow); min-width: 0; }
 .lhead { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -462,29 +460,18 @@ details.raw pre {
   box-shadow: var(--shadow-pop);
 }
 #toast.on { opacity: 1; transform: translate(-50%, 0); }
-/* Une ligne pleine par information. En deux colonnes, description et raccourcis
-   ne tiennent pas côte à côte (~185 caractères mono) : la description passait
-   sur deux lignes face à des raccourcis restés sur une seule, ce qui donnait ce
-   décrochage au milieu. Empilé, chaque ligne se lit seule et rien ne décroche. */
 footer {
-  display: flex; flex-direction: column; gap: 5px;
+  display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap;
   margin-top: 52px; padding-top: 14px; border-top: 1px solid var(--line);
   font: 400 11.5px/1.6 var(--mono); color: var(--ink3);
 }
-.fdesc b { color: var(--ink2); font-weight: 650; }
-.fkeys { color: var(--ink3); }
-/* la limite des listes gratuites est une mise en garde : sa propre ligne, pas
-   une subordonnée noyée en fin de phrase */
-.fwarn { color: var(--h-amber); margin-top: 3px; }
 
 /* ================= réglages (overlay) ================= */
 .ovl { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-start; justify-content: center;
   padding: 7vh 16px 24px; background: rgba(4,7,11,.55); overflow-y: auto; }
 .ovl[hidden] { display: none; }               /* sinon .ovl{display:flex} écrase [hidden] */
 @supports (backdrop-filter: blur(3px)) { .ovl { backdrop-filter: blur(3px); } }
-/* 880px : la liste de clés tient en 3 colonnes au lieu de 2, et les lignes
-   d'endpoints (méthode + chemin + description + actions) ne se replient plus. */
-.ovlcard { width: 100%; max-width: 880px; background: var(--card); border: 1px solid var(--line2);
+.ovlcard { width: 100%; max-width: 560px; background: var(--card); border: 1px solid var(--line2);
   border-radius: 12px; box-shadow: var(--shadow-pop, 0 6px 20px rgba(0,0,0,.4)); }
 .ovlhead { display: flex; align-items: center; gap: 12px; padding: 13px 16px 13px 18px; border-bottom: 1px solid var(--line); }
 .ovlhead h2 { margin: 0; flex: 1; font: 650 14px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--ink); }
@@ -529,175 +516,78 @@ footer {
 .keyitem.no .kname { color: var(--ink3); }
 .keyempty { font: 400 12px/1.5 var(--sans); color: var(--ink3); font-style: italic; }
 
-/* ── réglages : endpoints ── */
-.setwarn { color: var(--h-amber); }
-/* La grille vit sur le conteneur et les lignes en héritent (`subgrid`) : avec
-   une grille par ligne, chaque `.epRow` calculait ses propres largeurs et rien
-   ne s'alignait d'une ligne à l'autre (descriptions et badges en escalier). */
-#setEndpoints {
-  display: grid; grid-template-columns: 46px minmax(0, 1fr) minmax(0, 1.1fr) auto auto;
-  border: 1px solid var(--line); border-radius: 10px; overflow: hidden;
-}
-.epRow {
-  display: grid; grid-column: 1 / -1; grid-template-columns: subgrid;
-  align-items: center; gap: 10px; padding: 7px 12px;
-  border-top: 1px solid var(--line); background: var(--card2);
-}
-/* Repli si subgrid manque : lignes empilées, alignement approximatif mais lisible. */
-@supports not (grid-template-columns: subgrid) {
-  #setEndpoints { display: flex; flex-direction: column; }
-  .epRow { grid-template-columns: 46px minmax(0, 1fr) minmax(0, 1.1fr) auto auto; }
-}
-.epRow:first-child { border-top: none; }
-.epRow:hover { background: var(--card); }
-.epM { font: 650 9.5px/1 var(--mono); letter-spacing: .08em; text-align: center;
-  border-radius: 4px; padding: 4px 0; border: 1px solid transparent; }
-.epM.m-get  { color: var(--h-green); background: var(--hbg-green); border-color: var(--hbd-green); }
-.epM.m-post { color: var(--h-orange); background: var(--hbg-orange); border-color: var(--hbd-orange); }
-.epP { font: 500 12px/1.35 var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.epD { font: 400 11.5px/1.35 var(--sans); color: var(--ink3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.epTok { font: 600 9px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
-  color: var(--h-amber); background: var(--hbg-amber); border: 1px solid var(--hbd-amber);
-  border-radius: 4px; padding: 3px 6px; white-space: nowrap; }
-.epTokNone { background: none; border-color: transparent; }
-.epActs { display: flex; gap: 5px; justify-self: end; }
-.epActs .ghost { padding: 4px 9px; font-size: 10.5px; }
-a.epGo { text-decoration: none; display: inline-flex; align-items: center; }
-a.epGo.epOff { opacity: .4; pointer-events: none; }
-@media (max-width: 720px) {
-  .epRow { grid-template-columns: 46px minmax(0, 1fr) auto; row-gap: 4px; }
-  .epD { grid-column: 2 / -1; }
-  .epActs { grid-column: 1 / -1; justify-self: start; }
-}
-
-/* ================= comparateur & extracteur (overlays) ================= */
+/* ================= comparateur (overlay) ================= */
 .cmpOvl { position: fixed; inset: 0; z-index: 80; display: flex; align-items: flex-start; justify-content: center;
   padding: 5vh 16px 24px; background: rgba(4,7,11,.55); overflow-y: auto; }
 .cmpOvl[hidden] { display: none; }
 @supports (backdrop-filter: blur(3px)) { .cmpOvl { backdrop-filter: blur(3px); } }
 .cmpCard { width: 100%; max-width: 1020px; background: var(--card); border: 1px solid var(--line2);
   border-radius: 12px; box-shadow: var(--shadow-pop, 0 6px 20px rgba(0,0,0,.4)); display: flex; flex-direction: column; }
-.cmpHead { display: flex; align-items: baseline; gap: 10px; padding: 13px 16px 13px 18px; border-bottom: 1px solid var(--line); }
-.cmpHead h2 { margin: 0; font: 650 14px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--ink); }
-.cmpSubtitle { flex: 1; min-width: 0; font: 400 11.5px/1 var(--mono); color: var(--ink3);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmpHead .ovlx { align-self: center; }
+.cmpHead { display: flex; align-items: center; gap: 12px; padding: 13px 16px 13px 18px; border-bottom: 1px solid var(--line); }
+.cmpHead h2 { margin: 0; flex: 1; font: 650 14px/1 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--ink); }
 .cmpBody { padding: 16px 18px 20px; }
-
-/* ── saisie : le sujet est figé (c'est la fiche ouverte), les autres sont libres ── */
-.cmpSlots { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
-.cmpSlot { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 5px; position: relative; }
-.cmpSlot[hidden] { display: none; }
-.cmpSlotLab { font: 600 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
-.cmpSlot input { width: 100%; box-sizing: border-box; background: var(--card2); color: var(--ink);
-  border: 1px solid var(--line2); border-radius: 8px; padding: 9px 12px; font: 400 13px/1.4 var(--mono); }
-.cmpSlot input:focus { outline: none; border-color: var(--accent-bd); box-shadow: 0 0 0 3px var(--accent-bg); }
-.cmpSlot input::placeholder { color: var(--ink3); }
-.cmpSubject { display: flex; align-items: center; gap: 8px; min-width: 0; box-sizing: border-box;
-  background: var(--accent-bg); border: 1px solid var(--accent-bd); border-radius: 8px; padding: 9px 12px; }
-.cmpSubject .kdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.cmpSubjV { font: 500 13px/1.4 var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmpDrop { position: absolute; right: 6px; bottom: 7px; display: inline-flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; cursor: pointer; background: none; border: 0; border-radius: 6px; color: var(--ink3); }
-.cmpDrop:hover { color: var(--h-red); background: var(--hbg-red); }
-.cmpDrop svg { width: 13px; height: 13px; }
-#cmpSlotC input { padding-right: 34px; }
-.cmpActions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
-.cmpActions #cmpAdd[hidden] { display: none; }
-.cmpRun {
-  cursor: pointer; background: var(--accent-bg); border: 1px solid var(--accent-bd); border-radius: 8px;
-  color: var(--accent); font: 600 12.5px/1 var(--mono); letter-spacing: .04em; padding: 10px 22px;
-  transition: background .15s, color .15s;
+.cmpInputs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; }
+.cmpField { display: flex; flex-direction: column; gap: 5px; }
+.cmpField label { font: 600 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
+.cmpField input { width: 100%; background: var(--card2); color: var(--ink); border: 1px solid var(--line2);
+  border-radius: 8px; padding: 9px 12px; font: 400 13.5px/1.4 var(--mono); }
+.cmpField input:focus { outline: none; border-color: var(--accent-bd); box-shadow: 0 0 0 3px var(--accent-bg); }
+.cmpField input::placeholder { color: var(--ink3); }
+.cmpGo { display: flex; justify-content: center; margin-top: 14px; }
+.cmpGo button {
+  cursor: pointer; background: var(--accent-bg); color: var(--accent);
+  border: 1px solid var(--accent-bd); border-radius: 8px;
+  padding: 10px 32px; font: 650 12.5px/1 var(--mono); letter-spacing: .06em;
+  transition: background .15s, opacity .15s;
 }
-.cmpRun:hover { background: var(--accent-bd); color: var(--ink); }
-.cmpRun:disabled { opacity: .5; cursor: default; }
-.cmpActions .cmpRun { margin-left: auto; }
-
+.cmpGo button:hover { background: var(--accent-bd); }
+.cmpGo button:disabled { opacity: .5; cursor: default; }
 .cmpResults { display: flex; flex-direction: column; gap: 14px; margin-top: 20px; }
 .cmpLoading { font: 400 12.5px/1.5 var(--sans); color: var(--ink3); font-style: italic; text-align: center; padding: 22px; }
-.cmpErr { font: 400 12.5px/1.5 var(--mono); color: var(--h-red); text-align: center; padding: 14px; }
-
-/* ── tableau : en-têtes et valeurs partagent la même grille (--cn colonnes) ── */
-.cmpTbl { --cn: 2; display: flex; flex-direction: column; background: var(--card2);
-  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-.cmpRow { display: grid; grid-template-columns: 94px repeat(var(--cn), minmax(0, 1fr));
-  align-items: center; gap: 10px; padding: 8px 13px; border-top: 1px solid var(--line); }
-.cmpRow:first-child { border-top: none; }
-.cmpHdr { background: var(--card); align-items: stretch; padding: 12px 13px; }
-.cmpK { font: 600 10.5px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink3); }
-/* diff-first : seules les lignes divergentes sont marquées, l'identique s'efface */
-.cmpRow.ne { box-shadow: inset 2px 0 0 var(--h-amber); }
-.cmpVal { font: 400 12.5px/1.35 var(--mono); color: var(--ink3); min-width: 0; word-break: break-word; }
-.cmpVal.d { color: var(--ink); }
-.cmpVal.nil { color: var(--ink3); opacity: .55; }
-.cmpCol { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; min-width: 0; }
-.cmpColTop { display: flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
-.cmpColTop .kdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.cmpColV { font: 650 12.5px/1.25 var(--mono); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmpBadge { font: 600 9px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase;
-  color: var(--accent); background: var(--accent-bg); border: 1px solid var(--accent-bd);
-  border-radius: 4px; padding: 3px 6px; }
-.cmpColErr { font: 400 11px/1.3 var(--mono); color: var(--h-red); }
-/* couleurs posées en JS (var(--h-…)/--hbg/--hbd) : évite la course de spécificité
-   avec les classes .c-<teinte> déclarées plus haut dans la feuille */
-.cmpVerd { display: inline-flex; align-items: center; gap: 6px; font: 500 11.5px/1 var(--mono);
-  border-radius: 12px; padding: 4px 9px; border: 1px solid var(--line2); }
-.cmpVerd .cdot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex: none; }
-
-/* ── relation : une ligne par paire ── */
+.cmpResults > .cmpErr { font: 400 12.5px/1.5 var(--mono); color: var(--h-red); text-align: center; padding: 16px; }
+/* en-tête : les deux observables + leur verdict */
+.cmpTop { display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; align-items: start; }
+.cmpTopCol { min-width: 0; }
+.cmpQ { font: 650 13px/1.25 var(--mono); color: var(--ink); word-break: break-all; margin-bottom: 8px; }
+.cmpVs { align-self: center; font: 400 18px/1 var(--mono); color: var(--ink3); }
+.cmpErr { font: 400 12px/1.5 var(--mono); color: var(--h-red); }
+/* bandeau relation */
 .cmpRel { border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; background: var(--card2); }
-.cmpRel.linked { border-color: var(--hbd-amber); }
-.cmpRelLines { display: flex; flex-direction: column; gap: 7px; }
-.cmpRelLine { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-.cmpRelIco { font-size: 13px; line-height: 1; flex: none; }
-.cmpRelPair { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
-.cmpRelPair b { font: 650 11.5px/1.25 var(--mono); color: var(--ink); font-weight: 650; }
-.cmpRelVs { font: 400 13px/1 var(--mono); color: var(--ink3); }
-.cmpRelTxt { font: 400 11.5px/1.3 var(--mono); color: var(--ink2); }
-.cmpRelLine.indep .cmpRelTxt { color: var(--ink3); }
-.cmpShared { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 11px;
-  padding-top: 10px; border-top: 1px solid var(--line); }
-.cmpSharedT { font: 600 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); margin-right: 3px; }
-
-/* ── diff des signaux ── */
+.cmpRel.linked { border-color: var(--h-amber); }
+.cmpRelHead { display: flex; align-items: center; gap: 9px; }
+.cmpRelIco { font-size: 15px; line-height: 1; flex: none; }
+.cmpRelTxt { font: 650 12px/1.25 var(--mono); letter-spacing: .03em; color: var(--ink); }
+.cmpRel.indep .cmpRelTxt { color: var(--ink2); }
+.cmpShared { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+/* tableau aligné A | B */
+.cmpTbl { display: flex; flex-direction: column; background: var(--card2); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.cmpRow { display: grid; grid-template-columns: 92px 1fr 26px 1fr; align-items: center; gap: 8px; padding: 8px 13px; border-top: 1px solid var(--line); }
+.cmpRow:first-child { border-top: none; }
+.cmpHdr { background: var(--card); }
+.cmpHdr .cmpVa, .cmpHdr .cmpVb { font: 650 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
+.cmpK { font: 600 10.5px/1.2 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink3); }
+.cmpVa, .cmpVb { font: 400 12.5px/1.3 var(--mono); color: var(--ink2); min-width: 0; word-break: break-word; }
+.cmpVa.d, .cmpVb.d { color: var(--ink); }
+.cmpMk { font: 700 12px/1 var(--mono); text-align: center; color: var(--ink3); }
+.cmpMk.eq { color: var(--h-green); }
+.cmpMk.ne { color: var(--h-amber); }
+/* diff des signaux */
 .cmpSigDiff { display: flex; flex-direction: column; gap: 11px; }
 .cmpSigGrp { display: flex; flex-direction: column; gap: 6px; }
 .cmpSigT { font: 600 10px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink3); }
 .cmpSigGrp.gCommon .cmpSigT { color: var(--h-green); }
 .cmpSigW { display: flex; flex-wrap: wrap; gap: 5px; }
 .cmpSigW .chip { font-size: 11px; padding: 2px 8px; }
-
-/* ── extracteur d'IOC ── */
-.ovlcard--ex { max-width: 720px; }
-.exta { width: 100%; box-sizing: border-box; background: var(--card2); border: 1px solid var(--line2);
-  border-radius: 10px; padding: 12px 14px; color: var(--ink); font: 400 12.5px/1.6 var(--mono); resize: vertical; }
-.exta:focus { outline: none; border-color: var(--accent-bd); box-shadow: 0 0 0 3px var(--accent-bg); }
-.exta::placeholder { color: var(--ink3); }
-.exActions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
-.exHint { font: 400 11px/1.3 var(--mono); color: var(--ink3); }
-.exOut { display: flex; flex-direction: column; gap: 14px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
-.exOut[hidden] { display: none; }
-.exSum { font: 400 12px/1.4 var(--mono); color: var(--ink3); }
-.exSum b { color: var(--ink); font-weight: 650; }
-.exNone { font: 400 12.5px/1.5 var(--sans); color: var(--ink3); font-style: italic; }
-.exGrp { display: flex; flex-direction: column; gap: 7px; }
-.exGrpT { display: flex; align-items: center; gap: 7px; }
-.exGrpT .kdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.exGrpN { font: 600 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); }
-.exN { font: 400 10.5px/1 var(--mono); color: var(--ink3); }
-.exW { gap: 6px; }
-
 @media (max-width: 760px) {
+  .cmpInputs { grid-template-columns: 1fr; }
   .cmpCard { max-width: 100%; }
-  .cmpSlot { flex-basis: 100%; }
 }
 @media (max-width: 640px) {
   .cmpOvl { padding: 2vh 10px 16px; }
   .cmpBody { padding: 12px; }
-  /* colonnes empilées : la grille tient trop mal sous 3 colonnes sur mobile */
-  .cmpRow { grid-template-columns: 78px repeat(var(--cn), minmax(0, 1fr)); gap: 7px; padding: 7px 10px; }
-  .cmpVal, .cmpColV { font-size: 11.5px; }
-  .cmpBadge { display: none; }
+  .cmpTop { grid-template-columns: 1fr; }
+  .cmpVs { display: none; }
+  .cmpRow { grid-template-columns: 74px 1fr 22px 1fr; padding: 7px 10px; }
 }
 
 /* ================= responsive / a11y ================= */

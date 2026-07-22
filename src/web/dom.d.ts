@@ -64,6 +64,8 @@ type StaticId =
   | "secSources"
   | "selfNote"
   | "setClose"
+  | "setEndpoints"
+  | "setEndpointsSec"
   | "setEye"
   | "setKeys"
   | "setKeysSec"

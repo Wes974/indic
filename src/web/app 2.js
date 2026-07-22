@@ -1,28 +1,5 @@
 "use strict";
-/**
- * Élément garanti par le balisage statique d'index.html. Le type `StaticId`
- * (dom.d.ts) restreint les identifiants acceptés, ce qui autorise un retour
- * non-nullable : si l'id est dans index.html, l'élément existe.
- * Pour un élément créé à l'exécution, utiliser {@link $opt}.
- * @param {StaticId} id
- * @returns {HTMLElement}
- */
-const $ = (id) => /** @type {HTMLElement} */ (document.getElementById(id));
-/**
- * Élément qui peut ne pas exister encore (créé par le JS, pas par index.html).
- * Le retour nullable force l'appelant à traiter le cas absent.
- * @param {string} id
- * @returns {HTMLElement | null}
- */
-const $opt = (id) => document.getElementById(id);
-/** @param {StaticId} id @returns {HTMLInputElement} */
-const $input = (id) => /** @type {HTMLInputElement} */ ($(id));
-/** @param {StaticId} id @returns {HTMLTextAreaElement} */
-const $area = (id) => /** @type {HTMLTextAreaElement} */ ($(id));
-/** @param {StaticId} id @returns {HTMLButtonElement} */
-const $btn = (id) => /** @type {HTMLButtonElement} */ ($(id));
-/** @param {StaticId} id @returns {HTMLDetailsElement} */
-const $det = (id) => /** @type {HTMLDetailsElement} */ ($(id));
+const $ = (id) => document.getElementById(id);
 const LS = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
@@ -80,12 +57,11 @@ function trapFocus(node) {
 const token = () => LS.get("indic_token", "");
 
 /* ---------- thème ---------- */
-/** @type {ReturnType<typeof createPivotGraph> | null} */
 let GRAPH = null;   // instance du graphe de pivots (déclarée tôt : applyTheme la référence)
 const V_CACHE = new Map();   // cache verdict labels per value (évite refetcher le verdict)
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
-  /** @type {HTMLMetaElement} */ ($("mTheme")).content = t === "dark" ? "#0a0e13" : "#f3f5f8";
+  $("mTheme").content = t === "dark" ? "#0a0e13" : "#f3f5f8";
   $("icoMoon").style.display = t === "dark" ? "" : "none";
   $("icoSun").style.display  = t === "dark" ? "none" : "";
   const tb = $("themeBtn");
@@ -439,21 +415,11 @@ const VERDICT_HUE = { malicious: "red", suspect: "amber", clean: "green" };
 function createPivotGraph(card, leg, query, centralKind, initialPivots, centralVerdict) {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  // Le simulateur force-directed manipule des nœuds mutables enrichis au fil de
-  // l'exécution (dx/dy/fx/fy ajoutés par les passes physiques). Les typer
-  // précisément coûterait plus que ça ne rapporte ici : on se contente de
-  // sortir de l'inférence `never` due au littéral vide.
-  /** @type {any[]} */
   const nodes = [];
-  /** @type {Map<string, any>} */
   const nodeById = new Map();
-  /** @type {any[]} */
   const edges = [];
-  /** @type {Set<string>} */
   const edgeSet = new Set();
-  /** @type {any} */
-  let hovered = null;
-  let capped = false;
+  let hovered = null, capped = false;
 
   let W = Math.max(320, Math.round(card.clientWidth || 760));
   const H = 440;
@@ -480,15 +446,10 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  /** @type {string | undefined} */
-  let palTheme;
-  /** @type {ReturnType<typeof graphPalette> | undefined} */
-  let pal;
-  // palette() résout toujours `pal` avant de le renvoyer : le retour est donc
-  // non-nullable, ce que le type ci-dessous rend explicite pour les appelants.
+  let palTheme = null, pal = null;
   function palette() {
     const th = document.documentElement.dataset.theme;
-    if (th !== palTheme || !pal) { pal = graphPalette(); palTheme = th; }
+    if (th !== palTheme) { pal = graphPalette(); palTheme = th; }
     return pal;
   }
 
@@ -618,9 +579,7 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
   }
 
   /* --- boucle d'animation (aucune si reduced-motion) --- */
-  /** @type {number | null} */
-  let raf = null;
-  let running = false;
+  let raf = null, running = false;
   const anyLoading = () => nodes.some((n) => n.loading);
   function frame() {
     if (running) { frStep(); frStep(); if (temp < 0.6) running = false; }
@@ -635,9 +594,7 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
 
   /* --- hit-test + interactions --- */
   function nodeAt(mx, my) {
-      /** @type {any} */
-    let best = null;
-    let bd = Infinity;
+    let best = null, bd = Infinity;
     for (const nd of nodes) {
       const dx = nd.x - mx, dy = nd.y - my, d2 = dx * dx + dy * dy;
       const rr = nd.central ? 14 : 11;
@@ -694,7 +651,7 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
       if (capped) { toast("graphe plafonné (60 nœuds)"); capped = false; }
       if (nodes.length !== before) reheat(); else if (reduce) draw();
     } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") return;
+      if (err.name === "AbortError") return;
       nd.loading = false; toast("expansion impossible"); if (reduce) draw();
     }
   }
@@ -709,8 +666,7 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
     }
   }
 
-  /** @type {number | undefined} */
-  let rTimer;
+  let rTimer = null;
   function onResize() {
     clearTimeout(rTimer);
     rTimer = setTimeout(() => { fit(); reduce ? draw() : reheat(); }, 160);
@@ -725,7 +681,7 @@ function createPivotGraph(card, leg, query, centralKind, initialPivots, centralV
   if (reduce) { solveStatic(320); draw(); } else { running = true; startLoop(); }
 
   return {
-    redraw() { palTheme = undefined; if (raf) return; draw(); },   // ex. changement de thème
+    redraw() { palTheme = null; if (raf) return; draw(); },   // ex. changement de thème
     destroy() {
       gctrl.abort();
       if (raf) cancelAnimationFrame(raf);
@@ -790,7 +746,7 @@ function renderSources(data) {
   const oks = all.filter((e) => !e.error);
   const rank = (e) => ((e.facts?.length || 0) + (e.signals?.length || 0) + (e.pivots?.length || 0) ? 0 : 1);
   oks.sort((a, b) => rank(a) - rank(b));
-  $("cntSources").textContent = String(oks.length);          // le compteur ne reflète que les sources exploitables
+  $("cntSources").textContent = oks.length;          // le compteur ne reflète que les sources exploitables
   $("secSources").hidden = !all.length;
   oks.forEach((e) => w.append(srcCard(e)));
 
@@ -799,7 +755,7 @@ function renderSources(data) {
   const listEl = $("srcErrList"); listEl.replaceChildren();
   if (errs.length) {
     wrap.hidden = false;
-    /** @type {HTMLDetailsElement} */ (wrap).open = false;
+    wrap.open = false;
     const plur = errs.length > 1 ? "s" : "";
     $("srcErrSummary").textContent = `${errs.length} source${plur} indisponible${plur} (clé · quota · non supporté)`;
     for (const e of errs) {
@@ -909,9 +865,7 @@ function showLanding() {
   // Dashboard : stats publiques depuis /dashboard
   fetch("/dashboard").then(r => r.json()).then(d => {
     if (!d.total_lookups && d.error) return;
-    // Créé par buildLanding() : absent tant que la landing n'a pas été montée.
-    const s = $opt("landingStats");
-    if (!s) return;
+    const s = $("landingStats");
     s.replaceChildren();
     s.append(el("p", "lintro", "Dashboard — aperçu des derniers lookups :"));
     const verdicts = d.verdicts || {};
@@ -939,7 +893,6 @@ function showLanding() {
 }
 
 /* ---------- rendu global ---------- */
-/** @type {any} */
 let CUR = null;
 let FROM_PIVOT = false;   // true seulement quand le rendu suit une navigation via go() (pivot/graphe/historique)
 function render(data, info) {
@@ -947,10 +900,7 @@ function render(data, info) {
   $("err").hidden = true;
   $("skeleton").hidden = true;
   $("landing").hidden = true;
-  // La landing est construite paresseusement : avec ?q=… au chargement elle ne
-  // l'a jamais été, et #landingStats n'existe pas encore.
-  const lstats = $opt("landingStats");
-  if (lstats) lstats.hidden = true;
+  $("landingStats").hidden = true;
 
   const rep = $("report");
   rep.hidden = false;
@@ -973,13 +923,12 @@ function render(data, info) {
   // ton du compteur : suit le verdict quand il existe et n'est pas "malicious"
   // (évite un « N critique » rouge sous un bandeau « Propre »). Sinon : rouge si signaux critiques.
   const vlabel = data.verdict?.label;
-  /** @type {string | null} */
   let tone = null;                                  // neutre
   if (data.verdict && vlabel !== "malicious") tone = vlabel === "suspect" ? "amber" : null; // clean → neutre
   else if (reds > 0) tone = "red";                  // malicious ou type sans verdict
   cntSig.classList.toggle("c-red", tone === "red");
   cntSig.classList.toggle("c-amber", tone === "amber");
-  cntSig.textContent = reds > 0 ? `${sigs.length} dont ${reds} critique${reds > 1 ? "s" : ""}` : String(sigs.length);
+  cntSig.textContent = reds > 0 ? `${sigs.length} dont ${reds} critique${reds > 1 ? "s" : ""}` : sigs.length;
   cntSig.title = data.verdict
     ? `arbitrage : ${VERDICT_META[vlabel]?.label || vlabel} — ${sigs.length} signal(aux), dont ${reds} classé(s) critique`
     : "signaux de menace détectés (critique = malicious/C2/blocklist… en rouge)";
@@ -987,41 +936,24 @@ function render(data, info) {
   const sbar = $("sbarSignals");
   sbar.hidden = !sigs.length;
   if (sigs.length) {
-    // Les trois filtres partitionnent les signaux. Auparavant « Autres » ne
-    // couvrait que la teinte `slate` : un signal bleu/violet/vert (datacenter,
-    // tor, residential…) n'apparaissait dans aucun filtre et les compteurs ne
-    // tombaient pas juste face à « Tous ».
-    const cnts = { all: sigs.length, red: 0, amber: 0, slate: 0 };
-    for (const s of sigs) {
-      const h = hueOf(s.category);
-      if (h === "red" || h === "amber") cnts[h]++;
-      else cnts.slate++;
-    }
-    /** @type {NodeListOf<HTMLButtonElement>} */
-    const chips = sbar.querySelectorAll(".chp");
-    // Un filtre vide est masqué, pas grisé : « Critiques » affiché sans compte
-    // sur une fiche propre laissait croire qu'il restait quelque chose à voir.
-    chips.forEach((b) => {
+    // Compteurs par teinte
+    const cnts = { all: sigs.length };
+    for (const s of sigs) { const h = hueOf(s.category); cnts[h] = (cnts[h] || 0) + 1; }
+    sbar.querySelectorAll(".chp").forEach((b) => {
       const f = b.dataset.filter;
       const n = f === "all" ? cnts.all : (cnts[f] || 0);
       const span = b.querySelector(".fcnt");
       if (span) span.textContent = n > 0 ? `(${n})` : "";
-      b.hidden = n === 0 && f !== "all";
+      if (n === 0 && f !== "all") b.disabled = true;
     });
-    // Une seule catégorie représentée → la barre n'offre aucun choix utile.
-    const usable = [...chips].filter((b) => !b.hidden);
-    sbar.hidden = usable.length < 3;
-    /** « red »/« amber » par teinte exacte ; « slate » = tout le reste. */
-    const inFilter = (s, f) => {
-      const h = hueOf(s.category);
-      return f === "red" || f === "amber" ? h === f : h !== "red" && h !== "amber";
-    };
+    let activeFilter = "all";
     const applyFilter = (filter) => {
-      chips.forEach((b) => b.classList.toggle("chp--active", b.dataset.filter === filter));
-      const filtered = filter === "all" ? sigs : sigs.filter((s) => inFilter(s, filter));
+      activeFilter = filter;
+      sbar.querySelectorAll(".chp").forEach((b) => b.classList.toggle("chp--active", b.dataset.filter === filter));
+      const filtered = filter === "all" ? sigs : sigs.filter((s) => hueOf(s.category) === filter);
       chipList($("signals"), filtered, (s) => sigChip(s, true), 30);
     };
-    chips.forEach((b) => {
+    sbar.querySelectorAll(".chp").forEach((b) => {
       b.onclick = () => { if (!b.disabled) applyFilter(b.dataset.filter); };
     });
     applyFilter("all");
@@ -1030,7 +962,7 @@ function render(data, info) {
   }
 
   $("secPivots").hidden = !pivs.length;
-  $("cntPivots").textContent = String(pivs.length);
+  $("cntPivots").textContent = pivs.length;
   renderGraph(data.ip?.ip || data.query, data.kind, pivs, data.verdict?.label);
   chipList($("pivots"), pivs, pivotChip, 40);
 
@@ -1038,7 +970,7 @@ function render(data, info) {
 
   const nSrc = (data.enrichments || []).length;
   $("elapsed").textContent = `${(info.ms / 1000).toFixed(2)} s · ${nSrc} source${nSrc > 1 ? "s" : ""}`;
-  $det("rawWrap").open = false;
+  $("rawWrap").open = false;
   $("raw").textContent = JSON.stringify(data, null, 2);
 
   rep.classList.remove("enter"); void rep.offsetWidth; rep.classList.add("enter");
@@ -1049,11 +981,10 @@ function render(data, info) {
 }
 
 /* ---------- lookup ---------- */
-/** @type {AbortController | null} */
 let ctrl = null;
 function setLoading(on) {
   $("progress").classList.toggle("on", on);
-  const wrap = /** @type {HTMLElement} */ (document.querySelector("main.wrap"));
+  const wrap = document.querySelector("main.wrap");
   if (on) { wrap.setAttribute("aria-busy", "true"); $("landing").hidden = true; }
   else wrap.removeAttribute("aria-busy");
   const rep = $("report");
@@ -1094,7 +1025,6 @@ async function lookup(raw, self = false) {
   if (token()) opts.headers = { "x-indic-token": token() };
   try {
     const res = await fetch(url, opts);
-    /** @type {any} */
     let data = null;
     try { data = await res.json(); } catch {}
     if (!res.ok || !data || data.error) {
@@ -1107,23 +1037,23 @@ async function lookup(raw, self = false) {
     if (self) u.searchParams.delete("q"); else u.searchParams.set("q", data.query);
     history.replaceState(null, "", u);
   } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") return;
+    if (err.name === "AbortError") return;
     failLookup("erreur réseau — API injoignable ?");
   } finally {
     if (my === ctrl) setLoading(false);
   }
 }
 function go(q) {
-  $input("q").value = q;
+  $("q").value = q;
   FROM_PIVOT = true;
   window.scrollTo({ top: 0, behavior: "smooth" });
   lookup(q);
 }
 
 /* ---------- interactions ---------- */
-$("goBtn").onclick = () => { const v = $input("q").value.trim(); v ? lookup(v) : lookup("", true); };
+$("goBtn").onclick = () => { const v = $("q").value.trim(); v ? lookup(v) : lookup("", true); };
 $("q").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { const v = $input("q").value.trim(); v ? lookup(v) : lookup("", true); }
+  if (e.key === "Enter") { const v = $("q").value.trim(); v ? lookup(v) : lookup("", true); }
   if (e.key === "Escape") { $("q").blur(); if (ctrl) { ctrl.abort(); setLoading(false); } }
 });
 document.addEventListener("keydown", (e) => {
@@ -1131,38 +1061,31 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (!$("settings").hidden) { e.preventDefault(); closeSettings(); return; }
     if (!$("comparator").hidden) { e.preventDefault(); closeComparator(); return; }
-    if (!$("extractor").hidden) { e.preventDefault(); closeExtractor(); return; }
   }
-  const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "");
-  if (e.key === "/" && !typing) {
-    e.preventDefault(); $("q").focus(); $input("q").select();
+  if (e.key === "/" && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
+    e.preventDefault(); $("q").focus(); $("q").select();
   }
-  // Raccourcis : c = comparer la fiche courante, e = extracteur d'IOC
-  if (e.key === "c" && !e.metaKey && !e.ctrlKey && !typing) {
+  // Raccourci comparateur
+  if (e.key === "c" && !e.metaKey && !e.ctrlKey && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
     e.preventDefault(); openComparator();
-  }
-  if (e.key === "e" && !e.metaKey && !e.ctrlKey && !typing) {
-    e.preventDefault(); openExtractor();
   }
   // Raccourcis filtres signaux : 1=Tous, 2=Critiques, 3=Suspects, 4=Autres
   if (/^[1-4]$/.test(e.key) && !/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) {
     const filters = ["all", "red", "amber", "slate"];
     const f = filters[parseInt(e.key) - 1];
-    const btn = /** @type {HTMLButtonElement | null} */ (
-      document.querySelector(`#sbarSignals .chp[data-filter="${f}"]`));
+    const btn = document.querySelector(`#sbarSignals .chp[data-filter="${f}"]`);
     if (btn && !btn.disabled) btn.click();
   }
 });
 /* clic sur le logo : retour accueil sans recharger (garde clic-milieu / cmd-clic natifs) */
-/** @type {HTMLElement} */ (document.querySelector(".brand")).addEventListener("click", (e) => {
-  const me = /** @type {MouseEvent} */ (e);
-  if (me.metaKey || me.ctrlKey || me.shiftKey || me.button !== 0) return;
+document.querySelector(".brand").addEventListener("click", (e) => {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
   e.preventDefault();
   if (ctrl) ctrl.abort();
   setLoading(false);
   $("report").hidden = true;
   $("err").hidden = true;
-  $input("q").value = "";
+  $("q").value = "";
   const u = new URL(location.href); u.searchParams.delete("q"); history.replaceState(null, "", u);
   showLanding();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1170,7 +1093,7 @@ document.addEventListener("keydown", (e) => {
 $("obsCopy").onclick = () => copyText($("obsText").textContent);
 $("rawCopy").onclick = () => { if (CUR) copyText(JSON.stringify(CUR, null, 2)); };
 $("jsonBtn").onclick = () => {
-  const d = $det("rawWrap"); d.open = true;
+  const d = $("rawWrap"); d.open = true;
   d.scrollIntoView({ behavior: "smooth", block: "start" });
 };
 $("exportStix").onclick = () => {
@@ -1197,7 +1120,6 @@ $("tokenBtn").onclick = () => {
 };
 
 /* ---------- réglages (overlay token + statut clés API) ---------- */
-/** @type {HTMLElement | null} */
 let SET_RETURN = null;   // élément à re-focus à la fermeture
 function setMsg(text, kind) {
   const m = $("setMsg");
@@ -1238,74 +1160,7 @@ function renderKeys(data) {
   box.append(keyGroup("Configurées", ok.length, ok, keys));
   box.append(keyGroup("Manquantes", no.length, no, keys));
 }
-/* ---------- réglages : endpoints de l'API ----------
-   Statut « token » relevé dans src/api.rs : les routes gated répondent 403 sans
-   authentification, les autres sont ouvertes (le token n'y débloque que les
-   enrichers premium). */
-const ENDPOINTS = [
-  { m: "GET",  p: "/healthz",        d: "sonde de vie",                     gated: false, open: true },
-  { m: "GET",  p: "/dashboard",      d: "stats des derniers lookups",       gated: false, open: true },
-  { m: "GET",  p: "/lookup?q=8.8.8.8", d: "fiche complète d'un observable", gated: false, open: true },
-  { m: "GET",  p: "/lookup/export?q=8.8.8.8&format=stix", d: "export STIX / CSV", gated: false, open: true },
-  { m: "GET",  p: "/metrics",        d: "compteurs par source",             gated: true,  open: true },
-  { m: "GET",  p: "/metrics?format=prometheus", d: "même chose, scrapable", gated: true,  open: true },
-  { m: "GET",  p: "/settings",       d: "présence des clés API (booléens)", gated: true,  open: true },
-  { m: "GET",  p: "/history",        d: "historique (si INDIC_HISTORY=1)",  gated: true,  open: true },
-  { m: "GET",  p: "/correlate?q=8.8.8.8", d: "corrélation entre observables", gated: true, open: true },
-  { m: "POST", p: "/compare",        d: "2 à 3 observables côte à côte",    gated: false, open: false,
-    body: '{"items":["8.8.8.8","1.1.1.1"]}' },
-  { m: "POST", p: "/extract",        d: "extraction d'IOC d'un texte",      gated: false, open: false,
-    body: '{"text":"contact 8.8.8.8 et evil.example.com"}' },
-  { m: "POST", p: "/lookup/bulk",    d: "lookups en lot",                   gated: false, open: false,
-    body: '{"queries":["8.8.8.8","1.1.1.1"]}' },
-  { m: "POST", p: "/push",           d: "pousse vers MISP / OpenCTI",       gated: true,  open: false,
-    body: '{"query":"8.8.8.8"}' },
-];
-/** Commande curl équivalente — le token passe en en-tête, jamais dans l'URL. */
-function curlFor(ep) {
-  const parts = ["curl"];
-  if (ep.m !== "GET") parts.push("-X", ep.m);
-  if (ep.body) parts.push("-H", "'Content-Type: application/json'", "-d", `'${ep.body}'`);
-  if (ep.gated && token()) parts.push("-H", `'x-indic-token: ${token()}'`);
-  parts.push(`'${location.origin}${ep.p}'`);
-  return parts.join(" ");
-}
-function renderEndpoints() {
-  const box = $("setEndpoints");
-  box.replaceChildren();
-  const tok = token();
-  for (const ep of ENDPOINTS) {
-    const row = el("div", "epRow");
-    row.append(el("span", "epM m-" + ep.m.toLowerCase(), ep.m));
-    const path = el("span", "epP", ep.p);
-    row.append(path, el("span", "epD", ep.d));
-    // Cellule toujours émise, même vide : en grille, une ligne à qui il manque
-    // un enfant fait remonter les suivants d'une colonne — les actions des
-    // routes non gated se désalignaient de celles des routes gated.
-    row.append(ep.gated ? el("span", "epTok", "token") : el("span", "epTok epTokNone"));
-
-    const acts = el("span", "epActs");
-    // Un GET s'ouvre dans un onglet ; le token doit alors transiter par l'URL,
-    // seule forme que le navigateur sait envoyer sur une navigation.
-    if (ep.open) {
-      const a = el("a", "ghost epGo", "ouvrir");
-      const sep = ep.p.includes("?") ? "&" : "?";
-      a.href = ep.p + (ep.gated && tok ? sep + "token=" + encodeURIComponent(tok) : "");
-      a.target = "_blank";
-      a.rel = "noopener";
-      if (ep.gated && !tok) { a.classList.add("epOff"); a.title = "token requis"; }
-      acts.append(a);
-    }
-    const c = el("button", "ghost", "curl");
-    c.title = "Copier la commande curl (token en en-tête)";
-    c.onclick = () => copyText(curlFor(ep));
-    acts.append(c);
-    row.append(acts);
-    box.append(row);
-  }
-}
 async function loadSettings() {
-  renderEndpoints();
   const box = $("setKeys"); box.replaceChildren(el("div", "keyempty", "Chargement…"));
   try {
     const res = await fetch("/settings?token=" + encodeURIComponent(token()));
@@ -1322,9 +1177,9 @@ async function loadSettings() {
   }
 }
 function openSettings() {
-  SET_RETURN = /** @type {HTMLElement | null} */ (document.activeElement);
+  SET_RETURN = document.activeElement;
   $("settings").hidden = false;
-  const inp = $input("setToken");
+  const inp = $("setToken");
   inp.value = token(); inp.type = "password";
   $("setEye").classList.remove("on");
   $("setEye").setAttribute("aria-pressed", "false");
@@ -1342,7 +1197,7 @@ $("settingsBtn").onclick = openSettings;
 $("setClose").onclick = closeSettings;
 $("settings").addEventListener("click", (e) => { if (e.target === $("settings")) closeSettings(); });
 $("setEye").onclick = () => {
-  const inp = $input("setToken"), show = inp.type === "password";
+  const inp = $("setToken"), show = inp.type === "password";
   inp.type = show ? "text" : "password";
   $("setEye").classList.toggle("on", show);
   $("setEye").setAttribute("aria-pressed", show ? "true" : "false");
@@ -1350,7 +1205,7 @@ $("setEye").onclick = () => {
   inp.focus();
 };
 $("setSave").onclick = () => {
-  const v = $input("setToken").value.trim();
+  const v = $("setToken").value.trim();
   if (v) { LS.set("indic_token", v); setMsg("Token enregistré.", "ok"); }
   else { LS.del("indic_token"); setMsg("Token effacé.", ""); }
   refreshTokenBtn();
@@ -1360,10 +1215,9 @@ $("setToken").addEventListener("keydown", (e) => { if (e.key === "Enter") $("set
 trapFocus($("settings"));
 
 /* ---------- extracteur d'IOC (overlay) ---------- */
-/** @type {HTMLElement | null} */
 let EX_RETURN = null;
 function openExtractor() {
-  EX_RETURN = /** @type {HTMLElement | null} */ (document.activeElement);
+  EX_RETURN = document.activeElement;
   $("extractor").hidden = false;
   requestAnimationFrame(() => $("exText").focus());
 }
@@ -1408,8 +1262,8 @@ function renderExtract(out, iocs) {
   }
 }
 async function doExtract() {
-  const txt = $area("exText").value.trim();
-  const out = $("exOut"), btn = $btn("exGo");
+  const txt = $("exText").value.trim();
+  const out = $("exOut"), btn = $("exGo");
   if (!txt) { toast("Collez d'abord un texte"); $("exText").focus(); return; }
   btn.disabled = true; btn.textContent = "…";
   out.hidden = false;
@@ -1440,7 +1294,6 @@ trapFocus($("extractor"));
    Le comparateur part toujours du rapport affiché (le « sujet ») : comparer deux
    inconnus depuis l'accueil n'avait pas de sens et laissait un formulaire vide
    au milieu de la page. */
-/** @type {HTMLElement | null} */
 let CMP_RETURN = null;
 const CMP_MAX_EXTRA = 2;
 function cmpReady() { return !!(CUR && CUR.query); }
@@ -1451,7 +1304,7 @@ function addSlotC() {
 }
 function dropSlotC() {
   $("cmpSlotC").hidden = true;
-  $input("cmpC").value = "";
+  $("cmpC").value = "";
   $("cmpAdd").hidden = false;
 }
 function openComparator() {
@@ -1460,7 +1313,7 @@ function openComparator() {
     $("q").focus();
     return;
   }
-  CMP_RETURN = /** @type {HTMLElement | null} */ (document.activeElement);
+  CMP_RETURN = document.activeElement;
   const box = $("cmpSubject");
   box.replaceChildren();
   const dot = el("i", "kdot"); dot.style.background = `var(--h-${kindHue(CUR.kind)})`;
@@ -1468,7 +1321,7 @@ function openComparator() {
   box.title = CUR.query;
   $("cmpSubtitle").textContent = CUR.kind ? `sujet · ${CUR.kind}` : "";
   dropSlotC();
-  $input("cmpB").value = "";
+  $("cmpB").value = "";
   const res = $("cmpResults"); res.hidden = true; res.replaceChildren();
   $("comparator").hidden = false;
   requestAnimationFrame(() => $("cmpB").focus());
@@ -1481,8 +1334,6 @@ function closeComparator() {
 
 /* ---------- comparateur : rendu diff-first ---------- */
 function cmpAttrs(d) {
-  /** @type {{kind: string|null, country: string|null, asn: string|null, org: string|null,
-   *   infra: string|null, anon: string|null, verdict: string|null, sources: string}} */
   const a = { kind: d.kind || null, country: null, asn: null, org: null, infra: null,
               anon: null, verdict: null, sources: String((d.enrichments || []).length) };
   const ip = d.ip;
@@ -1520,18 +1371,13 @@ function cmpCol(label, d, isSubject) {
   const top = el("div", "cmpColTop");
   const dot = el("i", "kdot"); dot.style.background = `var(--h-${kindHue(d && d.kind)})`;
   top.append(dot, el("span", "cmpColV", trunc(label, 24)));
-  // le badge reste sur la ligne du titre : sinon la pastille de verdict de la
-  // colonne sujet décroche d'un cran par rapport aux autres colonnes
-  if (isSubject) top.append(el("span", "cmpBadge", "sujet"));
   c.append(top);
   c.title = label;
+  if (isSubject) c.append(el("span", "cmpBadge", "sujet"));
   if (!d) { c.append(el("span", "cmpColErr", "non reconnu")); return c; }
   if (d.verdict) {
     const m = VERDICT_META[d.verdict.label] || { hue: "slate", label: d.verdict.label };
-    const p = el("span", "cmpVerd");
-    p.style.color = `var(--h-${m.hue})`;
-    p.style.background = `var(--hbg-${m.hue})`;
-    p.style.borderColor = `var(--hbd-${m.hue})`;
+    const p = el("span", "cmpVerd c-" + m.hue);
     p.append(el("i", "cdot"), el("span", null, m.label));
     c.append(p);
   }
@@ -1638,15 +1484,15 @@ function renderComparison(box, labels, reports) {
 }
 async function doCompare() {
   if (!cmpReady()) return;
-  const b = $input("cmpB").value.trim();
+  const b = $("cmpB").value.trim();
   if (!b) { toast("Indiquez au moins un observable à comparer"); $("cmpB").focus(); return; }
   const items = [CUR.query, b];
   if (!$("cmpSlotC").hidden) {
-    const c = $input("cmpC").value.trim();
+    const c = $("cmpC").value.trim();
     if (c) items.push(c);
   }
 
-  const btn = $btn("cmpGo");
+  const btn = $("cmpGo");
   const res = $("cmpResults");
   btn.disabled = true; btn.textContent = "…";
   res.hidden = false;
@@ -1664,7 +1510,7 @@ async function doCompare() {
     const reports = Array.isArray(data.items) ? data.items : [data.a, data.b];
     renderComparison(res, items, reports);
   } catch (err) {
-    res.replaceChildren(el("div", "cmpErr", (err instanceof Error && err.message) || "Erreur réseau"));
+    res.replaceChildren(el("div", "cmpErr", err.message || "Erreur réseau"));
   } finally {
     btn.disabled = false; btn.textContent = "Comparer";
   }
@@ -1683,16 +1529,14 @@ trapFocus($("comparator"));
 refreshTokenBtn();
 renderHist();
 const initialQ = new URLSearchParams(location.search).get("q");
-if (initialQ) { $input("q").value = initialQ; lookup(initialQ); }
+if (initialQ) { $("q").value = initialQ; lookup(initialQ); }
 else showLanding();   // sans requête : page d'accueil (champ vide + entrée = toujours l'IP du visiteur)
 
-// Service worker : simple enregistrement. La mise à jour est gérée côté SW par
-// le versionnage du cache + clients.claim() ; désinscrire à chaque chargement
-// (ce qu'on faisait avant) le démolissait avant qu'il prenne le contrôle de la
-// page, donc le fallback hors-ligne ne fonctionnait jamais.
-// Le ?v= suit SW_VERSION (src/api.rs) : Cloudflare met les .js en cache 4 h en
-// écrasant le Cache-Control de l'origine, donc seule une URL différente propage
-// un nouveau worker sans délai. Un test Rust vérifie que les deux concordent.
+// Service worker — force update en déréglant toutes les anciennes versions d'abord.
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js?v=3').catch(() => {});
+  navigator.serviceWorker.getRegistrations().then(regs => {
+    regs.forEach(r => r.unregister());
+  }).finally(() => {
+    navigator.serviceWorker.register('/sw.js');
+  });
 }

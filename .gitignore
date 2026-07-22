@@ -21,3 +21,7 @@ ROADMAP.md
 VEILLE.md
 HONEYPOT.md
 /deploy/
+
+# Copies de conflit iCloud (« fichier 2.ext ») — le repo vit dans iCloud Drive,
+# ces doublons apparaissent tout seuls et n'ont rien à faire dans l'historique.
+* [0-9].*

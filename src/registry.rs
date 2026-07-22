@@ -9,14 +9,14 @@ use crate::observable::Observable;
 use std::time::Duration;
 
 use crate::enrich::{
-    abuseipdb, binaryedge, blocklists, censys, certspotter, circl_hashlookup, criminalip, crtsh,
-    crypto, cve, cvedb, dns, dshield, emailrep, filescan, fofa, fullhunt, github, gravatar,
-    greynoise, hudsonrock, hunter, hybridanalysis, ikwyd, intelx, internetdb, ipdata, ipgeo,
-    ipinfo, ipqs, leakix, malshare, maltiverse, malwarebazaar, maxmind, metadefender, misp, netlas,
-    onion, onyphe, opentip, osv, otx, phone, poc, proxycheck, pulsedive, quake, rdap, rdap_domain,
-    rdns, ripestat, safebrowsing, scamalytics, securitytrails, shodan, stopforumspam, threatfox,
-    traceix, triage, url_analysis, urlhaus, urlscan, urlscan_pro, username, validin, virustotal,
-    vpnapi, vulncheck, vulners, wayback, zoomeye,
+    abuseipdb, aura, binaryedge, blocklists, censys, certspotter, circl_hashlookup, criminalip,
+    crtsh, crypto, cve, cvedb, decryptor, dns, dshield, emailrep, filescan, fofa, fullhunt, github,
+    gravatar, greynoise, hudsonrock, hunter, hybridanalysis, ikwyd, intelx, internetdb, ipdata,
+    ipgeo, ipinfo, ipqs, leakix, malshare, maltiverse, malwarebazaar, maxmind, metadefender, misp,
+    netlas, onion, onyphe, opentip, osv, otx, phone, poc, proxycheck, pulsedive, quake, rdap,
+    rdap_domain, rdns, ripestat, safebrowsing, scamalytics, securitytrails, shodan, stopforumspam,
+    threatfox, traceix, triage, url_analysis, urlhaus, urlscan, urlscan_pro, username, validin,
+    virustotal, vpnapi, vulncheck, vulners, wayback, zoomeye,
 };
 
 // ── TTL constants (mirrored from enrich.rs) ──────────────────────────────
@@ -1080,6 +1080,21 @@ pub fn build() -> Registry {
     );
     enricher!(
         reg,
+        Aura,
+        "aura",
+        Some("TRACEIX_API_KEY"),
+        Observable::Hash(_),
+        TTL_HASH,
+        false,
+        |obs, ctx| async move {
+            match obs {
+                Observable::Hash(h) => aura::enrich_hash(&h, ctx).await,
+                _ => unreachable!(),
+            }
+        }
+    );
+    enricher!(
+        reg,
         FileScan,
         "filescan",
         Some("FILESCAN_API_KEY"),
@@ -1531,6 +1546,21 @@ pub fn build() -> Registry {
         |obs, ctx| async move {
             match obs {
                 Observable::Crypto(a) => crypto::ransomwhere(&a, ctx).await,
+                _ => unreachable!(),
+            }
+        }
+    );
+    enricher!(
+        reg,
+        Decryptor,
+        "decryptor",
+        None,
+        Observable::Crypto(_),
+        TTL_THREAT,
+        false,
+        |obs, ctx| async move {
+            match obs {
+                Observable::Crypto(a) => decryptor::enrich_crypto(&a, ctx).await,
                 _ => unreachable!(),
             }
         }

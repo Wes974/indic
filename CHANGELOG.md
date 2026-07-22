@@ -4,6 +4,17 @@ All notable changes to indic.
 
 ## [Unreleased]
 
+### Fixed
+- **Resolvers DNS publics classés « suspect »** : `1.1.1.1` ressortait suspect
+  parce qu'ipdata l'annonce `malicious`, alors qu'un resolver figure dans les
+  journaux de tout le monde — victimes comprises. Le prior « légitime »
+  n'existait que pour les domaines ; il couvre désormais une liste curée de
+  resolvers publics. Périmètre étroit : les adresses de résolution seulement,
+  pas les IP de CDN, qui hébergent réellement du contenu malveillant.
+  Contrairement au prior domaine, celui-ci est évalué **après** le test de
+  corroboration : trois sources sérieuses l'emportent toujours.
+
+
 ## [0.3.0] — 2026-07-22
 
 Release centrée sur l'exploitation : ce que l'outil montre, comment on lui fait

@@ -60,12 +60,12 @@ pub async fn ofac(addr: &str, ctx: &Ctx) -> Enrichment {
     }
 }
 
-/// Etherscan V2 (ETH uniquement) : solde + nombre de tx envoyées (nonce). Gated.
+/// Etherscan V2 (ETH uniquement) : solde + nombre de tx envoyées. Gated.
 pub async fn etherscan(addr: &str, ctx: &Ctx) -> Enrichment {
     let Some(ref key) = ctx.key("ETHERSCAN_API_KEY") else {
         return Enrichment::failed("etherscan", "clé absente".into());
     };
-    // Hash de transaction → détails de la tx ; sinon adresse → solde + nonce.
+    // Hash de transaction → détails de la tx ; sinon adresse → solde + compteur.
     if is_eth_tx(addr) {
         return match fetch_tx(&ctx.http, addr, key).await {
             Ok(e) => e,
@@ -73,7 +73,7 @@ pub async fn etherscan(addr: &str, ctx: &Ctx) -> Enrichment {
         };
     }
     match fetch(&ctx.http, addr, key).await {
-        Ok((wei, nonce)) => build(wei, nonce),
+        Ok((wei, tx_count)) => build(wei, tx_count),
         Err(e) => Enrichment::failed("etherscan", super::scrub(format!("{e:#}"), key)),
     }
 }
@@ -161,7 +161,9 @@ async fn fetch(http: &reqwest::Client, addr: &str, key: &str) -> Result<(u128, u
         .and_then(|x| x.as_str())
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    // Nombre de tx envoyées (nonce, hex) via le proxy JSON-RPC.
+    // Nombre de tx envoyées via le proxy JSON-RPC. Ethereum appelle ce compteur
+    // le « nonce » du compte — rien à voir avec un nonce cryptographique, d'où le
+    // nom explicite ici (CodeQL levait un faux positif sur l'ancien).
     let n: Value = http
         .get(BASE)
         .query(&[
@@ -177,21 +179,21 @@ async fn fetch(http: &reqwest::Client, addr: &str, key: &str) -> Result<(u128, u
         .error_for_status()?
         .json()
         .await?;
-    let nonce = n
+    let tx_count = n
         .get("result")
         .and_then(|x| x.as_str())
         .and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok())
         .unwrap_or(0);
-    Ok((wei, nonce))
+    Ok((wei, tx_count))
 }
 
-fn build(wei: u128, nonce: u64) -> Enrichment {
+fn build(wei: u128, tx_count: u64) -> Enrichment {
     let eth = wei as f64 / 1e18;
     Enrichment {
         source: "etherscan".into(),
         facts: vec![
             Fact::new("balance", format!("{eth:.4} ETH")),
-            Fact::new("tx_envoyées", nonce.to_string()),
+            Fact::new("tx_envoyées", tx_count.to_string()),
         ],
         signals: vec![],
         pivots: vec![],

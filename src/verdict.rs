@@ -36,12 +36,34 @@ fn category_weight(category: &str) -> i32 {
     }
 }
 
+/// Pourquoi un observable bénéficie d'un prior « légitime ». Le motif compte :
+/// un domaine majeur est innocenté parce que les IOC portent sur du contenu
+/// qu'il héberge ; un resolver DNS public l'est parce qu'il apparaît dans les
+/// journaux de trafic de tout le monde, victimes comprises. Deux raisons
+/// différentes, deux explications différentes à l'écran.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Trust {
+    /// Aucun prior.
+    None,
+    /// Domaine majeur, réservé, ou top-liste de popularité.
+    Domain,
+    /// Resolver DNS public identifié (Cloudflare, Quad9, NextDNS…).
+    Resolver,
+}
+
+impl Trust {
+    fn is_trusted(self) -> bool {
+        self != Trust::None
+    }
+}
+
 /// Calcule le verdict à partir des signaux et de la confiance dans l'observable.
 /// La **corroboration** prime : une seule source ne suffit pas à condamner (les
 /// feeds ont des FP — placeholders, sinkholes, hébergement), il faut plusieurs
 /// sources indépendantes. Le C2 (feed haute confiance) est la seule exception.
 /// `trusted` = domaine majeur ou réservé → prior « légitime ».
-pub fn compute(signals: &[Signal], trusted: bool) -> Verdict {
+pub fn compute(signals: &[Signal], trust: Trust) -> Verdict {
+    let trusted = trust.is_trusted();
     // Poids **max par source distincte** : une source bavarde (plusieurs
     // signaux) ne pèse pas plus lourd qu'une source sobre.
     let mut by_source: BTreeMap<&str, i32> = BTreeMap::new();
@@ -58,19 +80,35 @@ pub fn compute(signals: &[Signal], trusted: bool) -> Verdict {
     let pop_bonus = if trusted { 8 } else { 0 };
     let score = raw - pop_bonus;
 
-    let (label, rationale): (&'static str, String) = if trusted && raw > 0 {
+    let (label, rationale): (&'static str, String) = if trust == Trust::Domain && raw > 0 {
+        // Un domaine majeur est innocenté sans condition : les IOC portent sur
+        // ce qu'il héberge, pas sur lui. Comportement historique, inchangé.
         (
             "clean",
             format!(
-                "Signaux présents (poids {raw}) mais domaine de confiance (majeur ou réservé) — \
-                 les IOC portent sur du contenu hébergé ou des comptes référencés, pas sur le \
-                 domaine lui-même."
+                "Signaux présents (poids {raw}) mais domaine de confiance (majeur ou \
+                 réservé) — les IOC portent sur du contenu hébergé ou des comptes \
+                 référencés, pas sur le domaine lui-même."
             ),
         )
     } else if serious >= 3 || (has_c2 && serious >= 2) {
         (
             "malicious",
             format!("Menace corroborée par {serious} sources indépendantes (poids {raw})."),
+        )
+    } else if trust == Trust::Resolver && raw > 0 {
+        // Placé **après** le test de corroboration, à la différence du prior
+        // domaine : un resolver reconnu par trois sources sérieuses reste
+        // malveillant. Le prior neutralise le « une source dit malicious donc
+        // suspect », pas un faisceau concordant.
+        (
+            "clean",
+            format!(
+                "Signaux présents (poids {raw}) mais resolver DNS public identifié — ces \
+                 adresses figurent dans les journaux de tout le monde, victimes comprises, \
+                 ce qui les fait remonter dans les feeds d'abus. Un faisceau corroboré \
+                 l'emporterait sur ce prior."
+            ),
         )
     } else if serious >= 2 || has_c2 {
         (
@@ -113,6 +151,92 @@ fn is_reserved_domain(apex: &str) -> bool {
 }
 
 /// Domaines majeurs / infra légitimes (apex), **triés** pour `binary_search`.
+/// Resolvers DNS publics majeurs. **Périmètre volontairement étroit** : on
+/// n'innocente pas « tout Cloudflare » — les IP de CDN hébergent réellement du
+/// contenu malveillant et leurs signaux sont alors légitimes. Seules les
+/// adresses de résolution, qui apparaissent dans les journaux de trafic de
+/// n'importe qui, bénéficient du prior.
+///
+/// Comparées en `IpAddr` et non en texte : `2606:4700:4700::1111` s'écrit de
+/// plusieurs façons, une comparaison de chaînes en raterait la moitié.
+const PUBLIC_RESOLVERS: &[&str] = &[
+    // Cloudflare (1.1.1.2/.3 = filtrage malware/adulte)
+    "1.1.1.1",
+    "1.0.0.1",
+    "1.1.1.2",
+    "1.0.0.2",
+    "1.1.1.3",
+    "1.0.0.3",
+    "2606:4700:4700::1111",
+    "2606:4700:4700::1001",
+    "2606:4700:4700::1112",
+    "2606:4700:4700::1002",
+    // Google
+    "8.8.8.8",
+    "8.8.4.4",
+    "2001:4860:4860::8888",
+    "2001:4860:4860::8844",
+    // Quad9
+    "9.9.9.9",
+    "149.112.112.112",
+    "9.9.9.10",
+    "149.112.112.10",
+    "9.9.9.11",
+    "149.112.112.11",
+    "2620:fe::fe",
+    "2620:fe::9",
+    "2620:fe::10",
+    // OpenDNS / Cisco
+    "208.67.222.222",
+    "208.67.220.220",
+    "208.67.222.123",
+    "208.67.220.123",
+    "2620:119:35::35",
+    "2620:119:53::53",
+    // AdGuard
+    "94.140.14.14",
+    "94.140.15.15",
+    "94.140.14.15",
+    "94.140.15.16",
+    "2a10:50c0::ad1:ff",
+    "2a10:50c0::ad2:ff",
+    // CleanBrowsing
+    "185.228.168.9",
+    "185.228.169.9",
+    "185.228.168.10",
+    "185.228.169.11",
+    // NextDNS
+    "45.90.28.0",
+    "45.90.30.0",
+    // ControlD
+    "76.76.2.0",
+    "76.76.10.0",
+    // dns0.eu
+    "193.110.81.0",
+    "185.253.5.0",
+    // Mullvad
+    "194.242.2.2",
+    // Comodo Secure DNS
+    "8.26.56.26",
+    "8.20.247.20",
+];
+
+/// Ensemble normalisé, construit une fois : parser 50 chaînes à chaque lookup
+/// serait du gaspillage pur.
+static RESOLVER_SET: std::sync::LazyLock<std::collections::HashSet<std::net::IpAddr>> =
+    std::sync::LazyLock::new(|| {
+        PUBLIC_RESOLVERS
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .collect()
+    });
+
+/// Vrai si `ip` est un resolver DNS public connu.
+pub fn is_public_resolver(ip: &str) -> bool {
+    ip.parse::<std::net::IpAddr>()
+        .is_ok_and(|a| RESOLVER_SET.contains(&a))
+}
+
 /// Prior de popularité — première passe curée ; un feed top-1M (Majestic/Tranco)
 /// pourra l'élargir plus tard.
 const POPULAR: &[&str] = &[
@@ -244,7 +368,7 @@ mod tests {
             sig("threatfox", "malicious"),
             sig("hudsonrock", "infostealer"),
         ];
-        assert_eq!(compute(&sigs, true).label, "clean");
+        assert_eq!(compute(&sigs, Trust::Domain).label, "clean");
         assert!(is_trusted_domain("github.com") && is_trusted_domain("google.com"));
     }
 
@@ -252,7 +376,7 @@ mod tests {
     fn domaine_reserve_clean() {
         // example.com flaggé par des sources (placeholder de malware) → réservé → clean.
         let sigs = [sig("urlhaus", "malicious"), sig("blocklist", "suspicious")];
-        assert_eq!(compute(&sigs, true).label, "clean");
+        assert_eq!(compute(&sigs, Trust::Domain).label, "clean");
         assert!(is_trusted_domain("example.com"));
         assert!(!is_trusted_domain("evil-c2-domain.tk"));
     }
@@ -261,14 +385,14 @@ mod tests {
     fn corroboration_requise() {
         // 1 source « malicious » → suspect (non corroboré), pas malicious.
         assert_eq!(
-            compute(&[sig("urlhaus", "malicious")], false).label,
+            compute(&[sig("urlhaus", "malicious")], Trust::None).label,
             "suspect"
         );
         // 2 sources → suspect.
         assert_eq!(
             compute(
                 &[sig("urlhaus", "malicious"), sig("threatfox", "malicious")],
-                false
+                Trust::None,
             )
             .label,
             "suspect"
@@ -281,7 +405,7 @@ mod tests {
                     sig("threatfox", "malicious"),
                     sig("otx", "malware"),
                 ],
-                false
+                Trust::None,
             )
             .label,
             "malicious"
@@ -291,10 +415,14 @@ mod tests {
     #[test]
     fn c2_isole_suspect_corrobore_malicious() {
         // Un C2 seul (feed haute confiance) → suspect.
-        assert_eq!(compute(&[sig("feodo", "c2")], false).label, "suspect");
+        assert_eq!(compute(&[sig("feodo", "c2")], Trust::None).label, "suspect");
         // C2 + une autre source sérieuse → malicious.
         assert_eq!(
-            compute(&[sig("feodo", "c2"), sig("urlhaus", "malicious")], false).label,
+            compute(
+                &[sig("feodo", "c2"), sig("urlhaus", "malicious")],
+                Trust::None
+            )
+            .label,
             "malicious"
         );
     }
@@ -307,16 +435,76 @@ mod tests {
             sig("threatfox", "malicious"),
             sig("threatfox", "malicious"),
         ];
-        assert_eq!(compute(&sigs, false).label, "suspect");
+        assert_eq!(compute(&sigs, Trust::None).label, "suspect");
     }
 
     #[test]
     fn propre_sans_signal() {
-        assert_eq!(compute(&[], false).label, "clean");
+        assert_eq!(compute(&[], Trust::None).label, "clean");
         // Anonymisation/infra ne pèsent pas.
         assert_eq!(
-            compute(&[sig("tor_list", "tor"), sig("asdb", "datacenter")], false).label,
+            compute(
+                &[sig("tor_list", "tor"), sig("asdb", "datacenter")],
+                Trust::None
+            )
+            .label,
             "clean"
         );
+    }
+
+    /// Cas réel qui a motivé ce prior : `1.1.1.1` sortait « suspect » parce
+    /// qu'ipdata l'annonce `malicious` pendant que dshield et MISP le voient en
+    /// `threat`. Un resolver DNS public apparaît dans les journaux de tout le
+    /// monde, victimes comprises — ce n'est pas un attaquant.
+    #[test]
+    fn public_resolver_survives_a_single_malicious_source() {
+        let sigs = [
+            sig("ipdata", "malicious"),
+            sig("dshield", "threat"),
+            sig("misp", "threat"),
+        ];
+        assert_eq!(compute(&sigs, Trust::None).label, "suspect");
+        let v = compute(&sigs, Trust::Resolver);
+        assert_eq!(v.label, "clean");
+        assert!(
+            v.rationale.contains("resolver DNS public"),
+            "l'explication doit dire pourquoi, pas juste innocenter"
+        );
+    }
+
+    /// Le prior atténue, il n'immunise pas : trois sources sérieuses
+    /// l'emportent toujours.
+    #[test]
+    fn the_prior_does_not_make_a_resolver_untouchable() {
+        let sigs = [
+            sig("a", "malicious"),
+            sig("b", "phishing"),
+            sig("c", "compromised"),
+        ];
+        assert_eq!(compute(&sigs, Trust::Resolver).label, "malicious");
+    }
+
+    /// Périmètre volontairement étroit : les adresses de résolution seulement.
+    /// Une IP de CDN Cloudflare héberge réellement du contenu malveillant, ses
+    /// signaux sont légitimes et ne doivent pas être atténués.
+    #[test]
+    fn only_resolver_addresses_are_trusted() {
+        assert!(is_public_resolver("1.1.1.1"));
+        assert!(is_public_resolver("9.9.9.9"));
+        assert!(is_public_resolver("45.90.28.0")); // NextDNS
+        assert!(!is_public_resolver("104.16.0.1")); // CDN Cloudflare
+        assert!(!is_public_resolver("1.1.1.4")); // voisin, pas un resolver
+        assert!(!is_public_resolver("pas-une-ip"));
+    }
+
+    /// Les IPv6 s'écrivent de plusieurs façons : la comparaison se fait sur
+    /// l'adresse analysée, jamais sur le texte.
+    #[test]
+    fn ipv6_matches_whatever_the_notation() {
+        assert!(is_public_resolver("2606:4700:4700::1111"));
+        assert!(is_public_resolver("2606:4700:4700:0:0:0:0:1111"));
+        assert!(is_public_resolver(
+            "2606:4700:4700:0000:0000:0000:0000:1111"
+        ));
     }
 }

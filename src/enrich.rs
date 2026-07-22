@@ -1022,9 +1022,19 @@ pub async fn run(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) -> 
     let mut report = dispatch(query, obs, ctx, authorized).await;
     // Le domaine (ou l'apex d'une URL/email) est-il de confiance ? Liste curée +
     // réservés (verdict.rs) OU top mondial Majestic (store, prior de popularité).
-    let popular = observable_apex(obs).is_some_and(|a| {
+    // Prior « légitime ». Les resolvers DNS publics le reçoivent au même titre
+    // que les domaines majeurs : ils apparaissent dans les journaux de trafic de
+    // tout le monde, ce qui les fait remonter dans les feeds d'abus alors qu'ils
+    // ne sont ni attaquants ni compromis.
+    let trust = if observable_apex(obs).is_some_and(|a| {
         crate::verdict::is_trusted_domain(&a) || ctx.store.load().is_popular_domain(&a)
-    });
+    }) {
+        crate::verdict::Trust::Domain
+    } else if matches!(obs, Observable::Ip(_)) && crate::verdict::is_public_resolver(query) {
+        crate::verdict::Trust::Resolver
+    } else {
+        crate::verdict::Trust::None
+    };
     // Tous les signaux : ceux des enrichers + ceux du résumé IP.
     let mut signals: Vec<Signal> = report
         .enrichments
@@ -1034,7 +1044,7 @@ pub async fn run(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) -> 
     if let Some(r) = &report.ip {
         signals.extend(r.signals.iter().cloned());
     }
-    let v = crate::verdict::compute(&signals, popular);
+    let v = crate::verdict::compute(&signals, trust);
     // Exposé pour les types à dimension menace (verdict « clean » rassurant sur
     // une IP/domaine), ou dès qu'un signal existe — jamais sur un téléphone nu.
     let threat_kind = matches!(
@@ -1047,7 +1057,8 @@ pub async fn run(query: &str, obs: &Observable, ctx: &Ctx, authorized: bool) -> 
             | Observable::Email(_)
             | Observable::Crypto(_)
     );
-    report.verdict = (popular || v.raw > 0 || threat_kind).then_some(v);
+    report.verdict =
+        (trust != crate::verdict::Trust::None || v.raw > 0 || threat_kind).then_some(v);
     // Acteurs de menace : extraire les noms de famille/malware des enrichers.
     report.threat_actors = extract_threat_actors(&report);
     // Score de fraîcheur : 1.0 si vu aujourd'hui, décroît sur 90 jours.

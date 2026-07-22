@@ -5,7 +5,7 @@
 [![Rust](https://img.shields.io/badge/rust-2024-orange.svg?logo=rust)](https://www.rust-lang.org)
 
 **A single-binary CTI / OSINT enrichment platform in Rust.** Paste (almost)
-any observable and get aggregated threat-intel from ~60 free and keyed sources,
+any observable and get aggregated threat-intel from ~75 free and keyed sources,
 a calibrated verdict, a recursive pivot graph, and proactive monitoring.
 
 > Personal project, built for **defensive** and **authorized** security research
@@ -13,15 +13,22 @@ a calibrated verdict, a recursive pivot graph, and proactive monitoring.
 
 ## Screenshots
 
-The landing page — 13 observable types, each with clickable examples:
+The landing page — a dashboard of recent lookups, then 13 observable types with
+clickable examples:
 
 ![indic landing page](assets/01-landing.png)
 
 A domain report with the **calibrated verdict** — `github.com` reads **clean**
-despite hosted-malware signals, thanks to the corroboration + popularity model
-(the signals point to *hosted* content, not the domain itself):
+despite three critical signals (infostealer credentials, ThreatFox, URLhaus),
+thanks to the corroboration + popularity model: the IOCs point at *hosted*
+content, not at the domain itself.
 
 ![indic report for github.com](assets/02-report.png)
+
+The comparator — the report you are on, side by side with up to two other
+observables. Only diverging rows are marked, so differences read at a glance:
+
+![indic comparator](assets/03-compare.png)
 
 ---
 
@@ -35,9 +42,14 @@ source in parallel, dedups, caches, and returns one unified report.
 (`pkg:pypi/requests` → OSV).
 
 **Highlights**
-- **~60 enrichers** — geo/ASN, VPN/proxy/Tor/relay attribution (spur.us-style),
+- **~75 enrichers** — geo/ASN, VPN/proxy/Tor/relay attribution (spur.us-style),
   threat feeds, blocklists, RDAP/DNS/CT, passive DNS, sandbox/AV, leaks/pastes,
   crypto sanctions, and more. Keyed sources activate only if their key is present.
+- **Comparator** — the current report against 1 or 2 other observables: aligned
+  attributes with only the diverging rows marked, shared pivots, and a
+  common/unique split of the signals.
+- **IOC extractor** — paste an incident report, a phishing mail or raw logs;
+  every analysable observable comes back grouped by type, one click to enrich.
 - **Weighted verdict** — corroboration-based scoring (multiple independent
   sources required) + a popularity prior (curated list + Majestic top-100k +
   reserved domains) so legitimate platforms that *host* malware aren't flagged
@@ -76,12 +88,23 @@ cargo run --release -- lookup 8.8.8.8
 
 | Route | Purpose |
 |---|---|
-| `GET /` | Web UI (dark/light, pivot graph, landing examples) |
+| `GET /` | Web UI (dark/light, pivot graph, comparator, IOC extractor) |
 | `GET /lookup?q=<observable>` | Enrich any observable |
+| `GET /lookup/export?q=…&format=stix\|csv` | Same report as STIX 2.1 or CSV |
+| `POST /lookup/bulk` | Enrich a batch of observables |
+| `POST /compare` | 2–3 observables side by side (`{"items":[…]}`) |
+| `POST /extract` | Pull observables out of free-form text |
+| `GET /dashboard` | Public counters over recent lookups |
 | `GET /healthz` | Liveness |
-| `GET /metrics` | Per-source counters (gated) |
+| `GET /metrics` | Per-source counters, JSON or `?format=prometheus` (gated) |
 | `GET /settings` | Key-presence status (gated, never returns values) |
-| `POST /push?q=<observable>` | Enrich then push to MISP/OpenCTI (gated) |
+| `GET /history` | Recent lookups, if `INDIC_HISTORY=1` (gated) |
+| `GET /correlate?q=<observable>` | Correlations across history (gated) |
+| `POST /push` | Enrich then push to MISP/OpenCTI (gated) |
+
+The web UI lists these under **Settings → Endpoints**, with a ready-to-paste
+`curl` for each — the token goes in the `x-indic-token` header there, never in
+a URL that would land in browser history or proxy logs.
 
 Keyed enrichers require a token (`INDIC_TOKEN`) via `?token=`, the
 `x-indic-token` header, or the `indic_token` cookie. With no token configured
@@ -111,6 +134,12 @@ api.rs          axum HTTP + embedded web UI (web/index.html via include_str!)
 ```
 
 Single distroless image, no OpenSSL (reqwest on rustls). Builds for `arm64`/`amd64`.
+
+**Front-end**: vanilla JS, no framework and no bundler. `build.rs` inlines
+`style.css` and `app.js` into `index.html` at compile time, so the whole UI ships
+as one request from the binary — nothing to deploy alongside it. It is still
+type-checked: JSDoc annotations verified by `tsc --checkJs --noEmit`, run in CI
+next to a Playwright end-to-end suite.
 
 ## Disclaimer
 

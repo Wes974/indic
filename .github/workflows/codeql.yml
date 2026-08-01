@@ -28,7 +28,7 @@ jobs:
         # inutile de refaire un cargo build ici — le job `check` s'en charge.
         language: [rust, javascript-typescript]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Initialisation
         uses: github/codeql-action/init@v4
